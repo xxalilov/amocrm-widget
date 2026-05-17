@@ -44,7 +44,6 @@ export async function searchContactsByPhone(
     accessToken
   );
   const contacts = result._embedded?.contacts || [];
-
   return contacts.filter(contact => {
     const contactPhone = extractPhone(contact);
     return contactPhone === phone;
@@ -92,52 +91,188 @@ export async function mergeContacts(
   accessToken: string
 ): Promise<void> {
   for (const dupId of duplicateIds) {
-    console.log(`Dublikat kontakt qayta ishlanmoqda: ${dupId}`);
+    console.log(`\n==========`);
+    console.log(`MERGING CONTACT ${dupId} -> ${mainId}`);
+    console.log(`==========\n`);
+
     try {
-      const leadsResponse = await amoRequest<any>(
+      const duplicateContact = await amoRequest<any>(
         subdomain,
         'get',
-        `/api/v4/leads?filter[contacts][id]=${dupId}`,
+        `/api/v4/contacts/${dupId}?with=leads`,
         accessToken
       );
-      const leads = leadsResponse._embedded?.leads || [];
 
-      for (const lead of leads) {
+      const linkedLeads = duplicateContact._embedded?.leads || [];
+
+      console.log(
+        `Duplicate contact ${dupId} has ${linkedLeads.length} linked leads`
+      );
+
+      for (const lead of linkedLeads) {
         const leadId = lead.id;
-        const leadDetails = await amoRequest<any>(
+
+        const leadData = await amoRequest<any>(
           subdomain,
           'get',
-          `/api/v4/leads/${leadId}`,
+          `/api/v4/leads/${leadId}?with=contacts`,
           accessToken
         );
-        const currentContacts = leadDetails._embedded?.contacts || [];
 
-        const updatedContacts = currentContacts.map((c: any) =>
-          c.id === dupId ? { ...c, id: mainId, is_main: c.is_main } : c
+        const currentContacts =
+          leadData._embedded?.contacts || [];
+
+        console.log(
+          `Lead ${leadId} current contacts:`,
+          currentContacts.map((c: any) => c.id)
         );
 
+        try {
+          await amoRequest(
+            subdomain,
+            'post',
+            `/api/v4/leads/${leadId}/unlink`,
+            accessToken,
+            [
+              {
+                to_entity_id: dupId,
+                to_entity_type: 'contacts'
+              }
+            ]
+          );
+
+        } catch (unlinkErr: any) {
+          console.warn(
+            `Failed to unlink duplicate contact ${dupId} from lead ${leadId}:`,
+            unlinkErr.message
+          );
+        }
+
+        const mainAlreadyLinked = currentContacts.some(
+          (c: any) => c.id === mainId
+        );
+
+        if (!mainAlreadyLinked) {
+          try {
+            await amoRequest(
+              subdomain,
+              'post',
+              `/api/v4/leads/${leadId}/link`,
+              accessToken,
+              [
+                {
+                  to_entity_id: mainId,
+                  to_entity_type: 'contacts',
+                  metadata: {
+                    is_main: true
+                  }
+                }
+              ]
+            );
+
+          } catch (linkErr: any) {
+            console.error(
+              `Failed to link main contact ${mainId} to lead ${leadId}:`,
+              linkErr.message
+            );
+          }
+        } else {
+          console.log(
+            `Main contact ${mainId} already linked to lead ${leadId}`
+          );
+        }
+
+        await new Promise(resolve => setTimeout(resolve, 250));
+      }
+
+      const mainContact = await amoRequest<any>(
+        subdomain,
+        'get',
+        `/api/v4/contacts/${mainId}`,
+        accessToken
+      );
+
+      const mainFields =
+        mainContact.custom_fields_values || [];
+
+      const dupFields =
+        duplicateContact.custom_fields_values || [];
+
+      const mergedFields = [...mainFields];
+
+      for (const dupField of dupFields) {
+        const exists = mergedFields.some(
+          (field: any) =>
+            field.field_id === dupField.field_id
+        );
+
+        if (!exists) {
+          mergedFields.push(dupField);
+        }
+      }
+
+      try {
         await amoRequest(
           subdomain,
           'patch',
-          `/api/v4/leads/${leadId}`,
+          `/api/v4/contacts/${mainId}`,
           accessToken,
-          { _embedded: { contacts: updatedContacts } }
+          {
+            custom_fields_values: mergedFields
+          }
         );
 
-        await new Promise(resolve => setTimeout(resolve, 200));
+        console.log(`Main contact ${mainId} updated`);
+      } catch (updateErr: any) {
+        console.warn(
+          `Failed to update main contact ${mainId}:`,
+          updateErr.message
+        );
       }
+
+      try {
+        const mergedName =
+          `[MERGED ${new Date()
+            .toISOString()
+            .slice(0, 19)}] ` +
+          (duplicateContact.name || `CONTACT ${dupId}`);
 
         await amoRequest(
           subdomain,
           'patch',
           `/api/v4/contacts/${dupId}`,
-           accessToken,
-          { status: 'archived' }
+          accessToken,
+          {
+            name: mergedName
+          }
         );
 
-    } catch (error: any) {
-      console.error(`Dublikat ${dupId} ni qayta ishlashda xatolik:`, error.message);
-      throw new Error(`Kontaktni birlashtirishda xatolik ${dupId}: ${error.message}`);
+        console.log(
+          `Duplicate contact ${dupId} renamed`
+        );
+      } catch (renameErr: any) {
+        console.warn(
+          `Failed to rename duplicate contact ${dupId}:`,
+          renameErr.message
+        );
+      }
+
+      console.log(
+        `CONTACT ${dupId} SUCCESSFULLY MERGED`
+      );
+
+    } catch (err: any) {
+
+      console.log(err)
+
+      console.error(
+        `FAILED TO MERGE CONTACT ${dupId}:`,
+        err.message
+      );
+
+      throw new Error(
+        `Merge failed for contact ${dupId}: ${err.message}`
+      );
     }
   }
 }
@@ -149,94 +284,135 @@ export async function mergeLeads(
   accessToken: string
 ): Promise<void> {
   for (const dupId of duplicateIds) {
-    console.log(`Birlashtirilmoqda: dublikat lead ${dupId} → asosiy ${mainId}`);
+
     try {
-      const mainLead = await amoRequest<any>(subdomain, 'get', `/api/v4/leads/${mainId}`, accessToken);
-      const dupLead = await amoRequest<any>(subdomain, 'get', `/api/v4/leads/${dupId}`, accessToken);
+      const mainLead = await amoRequest<any>(
+        subdomain,
+        'get',
+        `/api/v4/leads/${mainId}?with=contacts`,
+        accessToken
+      );
+
+      const dupLead = await amoRequest<any>(
+        subdomain,
+        'get',
+        `/api/v4/leads/${dupId}?with=contacts`,
+        accessToken
+      );
 
       const updatePayload: any = {};
-      if (!mainLead.name && dupLead.name) updatePayload.name = dupLead.name;
-      if (!mainLead.price && dupLead.price) updatePayload.price = dupLead.price;
-      if (!mainLead.responsible_user_id && dupLead.responsible_user_id)
+
+      if (!mainLead.name && dupLead.name) {
+        updatePayload.name = dupLead.name;
+      }
+
+      if (!mainLead.price && dupLead.price) {
+        updatePayload.price = dupLead.price;
+      }
+
+      if (!mainLead.responsible_user_id && dupLead.responsible_user_id) {
         updatePayload.responsible_user_id = dupLead.responsible_user_id;
-
-      const mainCustom = mainLead.custom_fields_values || [];
-      const dupCustom = dupLead.custom_fields_values || [];
-      const mergedCustom = [...mainCustom];
-      for (const dupField of dupCustom) {
-        const exists = mergedCustom.some((f: any) => f.field_id === dupField.field_id);
-        if (!exists) mergedCustom.push(dupField);
-      }
-      if (mergedCustom.length) updatePayload.custom_fields_values = mergedCustom;
-
-      if (Object.keys(updatePayload).length) {
-        await amoRequest(subdomain, 'patch', `/api/v4/leads/${mainId}`, accessToken, updatePayload);
-        console.log(`Asosiy lead ${mainId} yangilandi`);
       }
 
-      try {
-        const notesResponse = await amoRequest<any>(
+      const mainFields = mainLead.custom_fields_values || [];
+      const dupFields = dupLead.custom_fields_values || [];
+
+      const mergedFields = [...mainFields];
+
+      for (const f of dupFields) {
+        const exists = mergedFields.some((x: any) => x.field_id === f.field_id);
+        if (!exists) mergedFields.push(f);
+      }
+
+      if (mergedFields.length) {
+        updatePayload.custom_fields_values = mergedFields;
+      }
+
+      if (Object.keys(updatePayload).length > 0) {
+        await amoRequest(
           subdomain,
-          'get',
-          `/api/v4/notes?filter[entity_id]=${dupId}&filter[entity_type]=leads`,
-          accessToken
+          'patch',
+          `/api/v4/leads/${mainId}`,
+          accessToken,
+          updatePayload
         );
-        const notes = notesResponse._embedded?.notes || [];
-        for (const note of notes) {
-          await amoRequest(subdomain, 'post', `/api/v4/notes`, accessToken, {
-            entity_id: mainId,
-            entity_type: 'leads',
-            note_type: note.note_type,
-            text: note.text,
-            params: note.params
-          });
-        }
-        console.log(`${notes.length} ta nota ko‘chirildi`);
-      } catch (e: any) { console.warn(`Nota ko‘chirishda xatolik: ${e.message}`); }
+      }
 
-      try {
-        const tasksResponse = await amoRequest<any>(
-          subdomain,
-          'get',
-          `/api/v4/tasks?filter[entity_id]=${dupId}&filter[entity_type]=leads`,
-          accessToken
+      const dupContacts = dupLead._embedded?.contacts || [];
+      const mainContacts = mainLead._embedded?.contacts || [];
+
+      for (const contact of dupContacts) {
+        const exists = mainContacts.some((c: any) => c.id === contact.id);
+
+        if (!exists) {
+          await amoRequest(
+            subdomain,
+            'post',
+            `/api/v4/leads/${mainId}/link`,
+            accessToken,
+            [
+              {
+                to_entity_id: contact.id,
+                to_entity_type: 'contacts'
+              }
+            ]
+          );
+        }
+      }
+
+      const tasksRes = await amoRequest<any>(
+        subdomain,
+        'get',
+        `/api/v4/tasks?filter[entity_type]=leads&filter[entity_id]=${dupId}`,
+        accessToken
+      );
+
+      const dupTasks = tasksRes._embedded?.tasks || [];
+
+      for (const task of dupTasks) {    
+
+    try {
+        await amoRequest(
+            subdomain,
+            'post',
+            `/api/v4/tasks`,
+            accessToken,
+            [  
+                {
+                    task_type_id: task.task_type_id,
+                    text: task.text,
+                    complete_till: task.complete_till,
+                    responsible_user_id: task.responsible_user_id,
+                    entity_id: mainId, 
+                    entity_type: 'leads'      
+                }
+            ]
         );
-        const tasks = tasksResponse._embedded?.tasks || [];
-        for (const task of tasks) {
-          await amoRequest(subdomain, 'post', `/api/v4/tasks`, accessToken, {
-            entity_id: mainId,
-            entity_type: 'leads',
-            task_type_id: task.task_type_id,
-            text: task.text,
-            complete_till: task.complete_till,
-            responsible_user_id: task.responsible_user_id
-          });
-        }
-        console.log(`${tasks.length} ta task ko‘chirildi`);
-      } catch (e: any) { console.warn(`Task ko‘chirishda xatolik: ${e.message}`); }
+    } catch (e: any) {
+        console.warn(`Task copy failed: ${e.message}`);
+    }
+}
+      const mergedName = `[MERGED ${new Date().toISOString().slice(0, 19)}] ${
+        dupLead.name || `LEAD ${dupId}`
+      }`;
 
-      try {
-        const newName = `[MERGED ${new Date().toISOString().slice(0,19)}] ${dupLead.name || 'Lead'}`;
-        await amoRequest(subdomain, 'patch', `/api/v4/leads/${dupId}`, accessToken, {
-          name: newName,
-        });
-
-        await amoRequest(subdomain, 'patch', `/api/v4/leads/${dupId}`, accessToken, {
+      await amoRequest(
+        subdomain,
+        'patch',
+        `/api/v4/leads/${dupId}`,
+        accessToken,
+        {
+          name: mergedName,
           _embedded: { contacts: [] }
-        });
-        console.log(`Dublikat lead ${dupId} dan kontaktlar olib tashlandi`);
-      } catch (e: any) {
-        console.warn(`Leadni yashirishda xatolik: ${e.message}`);
-      }
+        }
+      );
 
-      await new Promise(resolve => setTimeout(resolve, 300));
     } catch (err: any) {
-      console.error(`Lead ${dupId} ni birlashtirishda xatolik:`, err.message);
+      console.error(`FAILED MERGE ${dupId}:`, err.message);
       throw new Error(`Merge failed for lead ${dupId}: ${err.message}`);
     }
   }
 }
-
 
 export async function searchLeadsByName(
   subdomain: string,
@@ -262,7 +438,9 @@ export async function getAllLeads(subdomain: string, accessToken: string): Promi
   let hasMore = true;
   while (hasMore) {
     const result = await amoRequest<any>(subdomain, 'get', `/api/v4/leads?limit=${limit}&page=${page}`, accessToken);
+
     const pageLeads = result._embedded?.leads || [];
+
     leads.push(...pageLeads);
     hasMore = pageLeads.length === limit;
     page++;
