@@ -1,0 +1,23 @@
+{
+  "widget": {
+    "name": "Duplicate Finder/Merger",
+    "description": "Finds and merges duplicate contacts and leads by phone, email or name. Configure matching rules, merge or tag duplicates, and review the merge history.",
+    "short_description": "Find and merge duplicate contacts and leads.",
+    "category": "tools",
+    "version": "1.0.0",
+    "interface_version": 2,
+    "init_once": false,
+    "locale": ["ru", "en"],
+    "installation": true
+  },
+  "locations": [
+    "settings",
+    "widget_page"
+  ],
+  "left_menu": {
+    "logo_locales": {
+      "ru": "/images/logo_small.png",
+      "en": "/images/logo_small.png"
+    }
+  }
+}

@@ -1,5 +1,21 @@
 import axios from 'axios';
+import http from 'http';
+import https from 'https';
 import { AmoEntity, SearchResult } from '../types';
+import { ContactSettings } from '../interfaces/contact-settings';
+import { LeadSettings } from '../interfaces/lead-settings';
+import { RateLimiter } from '../utils/rateLimiter';
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+// Shared client with keep-alive connection pooling (reused across all requests).
+const httpAgent = new http.Agent({ keepAlive: true, maxSockets: 50 });
+const httpsAgent = new https.Agent({ keepAlive: true, maxSockets: 50 });
+const client = axios.create({ httpAgent, httpsAgent, timeout: 30_000 });
+
+// ~6.2 req/s per account, safely under amoCRM's ~7 req/s cap.
+const limiter = new RateLimiter(160);
+const MAX_RETRIES = 4;
 
 export async function amoRequest<T>(
   subdomain: string,
@@ -8,18 +24,43 @@ export async function amoRequest<T>(
   accessToken: string,
   data?: any
 ): Promise<T> {
-  const instance = axios.create({
-    baseURL: `https://${subdomain}.amocrm.ru`,
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json'
+  return limiter.schedule(subdomain, async () => {
+    let attempt = 0;
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      try {
+        const response = await client.request<T>({
+          method,
+          url: `https://${subdomain}.amocrm.ru${url}`,
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+          },
+          data,
+        });
+        return response.data;
+      } catch (err: any) {
+        const status = err.response?.status;
+        const retriable = status === 429 || (status >= 500 && status < 600);
+        if (!retriable || attempt >= MAX_RETRIES) throw err;
+
+        const retryAfter = Number(err.response?.headers?.['retry-after']);
+        const backoff = retryAfter > 0
+          ? retryAfter * 1000
+          : Math.min(2 ** attempt * 500, 8000);
+        console.warn(`amoCRM ${status} on ${url} — retry ${attempt + 1}/${MAX_RETRIES} after ${backoff}ms`);
+        await sleep(backoff);
+        attempt++;
+      }
     }
   });
-
-  const response = await instance({ method, url, data });
-  return response.data;
 }
 
+
+export async function getPipelines(subdomain: string, accessToken: string): Promise<any[]> {
+  const result = await amoRequest<any>(subdomain, 'get', '/api/v4/leads/pipelines', accessToken);
+  return result._embedded?.pipelines || [];
+}
 
 export function extractPhone(entity: AmoEntity): string | null {
   const phones = entity.custom_fields_values?.filter(
@@ -30,6 +71,68 @@ export function extractPhone(entity: AmoEntity): string | null {
   if (!rawPhone) return null;
 
   return rawPhone.replace(/\D/g, '');
+}
+
+export function extractEmail(entity: AmoEntity): string | null {
+  const emails = entity.custom_fields_values?.filter(
+    f => f.field_code === 'EMAIL' || f.field_name === 'Email'
+  ) || [];
+  if (emails.length === 0) return null;
+  const raw = emails[0].values[0]?.value;
+  return raw ? raw.toLowerCase().trim() : null;
+}
+
+// Extract comparison key per ContactSettings.fields, applying formatting/trim.
+export function extractContactKey(entity: AmoEntity, settings: ContactSettings): string | null {
+  if (settings.fields === 'name') {
+    return entity.name?.toLowerCase().trim() || null;
+  }
+  if (settings.fields === 'email') {
+    return extractEmail(entity);
+  }
+  // phone (default)
+  let phone = extractPhone(entity);
+  if (!phone) return null;
+  if (settings.isFormatNumber && settings.checkNumberLength > 0) {
+    phone = phone.slice(-settings.checkNumberLength);
+  }
+  return phone;
+}
+
+// Internal marker tag put on a duplicate after it has been merged away.
+// amoCRM v4 has no delete API, so we tag + filter instead of deleting.
+export const MERGED_TAG = 'merged_duplicate';
+
+export function hasTag(entity: any, tagName: string): boolean {
+  return (entity?._embedded?.tags || []).some((t: any) => t.name === tagName);
+}
+
+// Append a tag to entities using amoCRM's `tags_to_add` (does not drop existing tags).
+export async function addTag(
+  subdomain: string,
+  entityType: 'contacts' | 'leads',
+  ids: number[],
+  tagName: string,
+  accessToken: string,
+): Promise<void> {
+  for (const id of ids) {
+    try {
+      await amoRequest(subdomain, 'patch', `/api/v4/${entityType}/${id}`, accessToken, {
+        tags_to_add: [{ name: tagName }],
+      });
+    } catch (err: any) {
+      console.warn(`Failed to add tag to ${entityType}/${id}: ${err.message}`);
+    }
+  }
+}
+
+// Pick main entity by advantage strategy (used for auto-merge).
+export function pickMainByAdvantage<T extends AmoEntity>(items: T[], advantage: string): T | null {
+  if (items.length === 0) return null;
+  const sorted = [...items].sort((a, b) =>
+    advantage === 'oldest' ? a.updated_at - b.updated_at : b.updated_at - a.updated_at
+  );
+  return sorted[0];
 }
 
 export async function searchContactsByPhone(
@@ -50,6 +153,34 @@ export async function searchContactsByPhone(
   });
 }
 
+// Settings-aware contact search. Picks the field (phone/email/name) from settings,
+// normalizes both the search term and each candidate via extractContactKey, then matches.
+export async function searchContacts(
+  subdomain: string,
+  term: string,
+  accessToken: string,
+  settings: ContactSettings,
+): Promise<AmoEntity[]> {
+  let key: string;
+  if (settings.fields === 'phone') {
+    key = term.replace(/\D/g, '');
+    if (settings.isFormatNumber && settings.checkNumberLength > 0) {
+      key = key.slice(-settings.checkNumberLength);
+    }
+  } else {
+    key = term.toLowerCase().trim();
+  }
+
+  const result = await amoRequest<SearchResult>(
+    subdomain,
+    'get',
+    `/api/v4/contacts?query=${encodeURIComponent(term)}`,
+    accessToken,
+  );
+  const contacts = result._embedded?.contacts || [];
+  return contacts.filter((c) => !hasTag(c, MERGED_TAG) && extractContactKey(c, settings) === key);
+}
+
 export async function searchLeadsByPhone(
   subdomain: string,
   phone: string,
@@ -63,24 +194,42 @@ export async function searchLeadsByPhone(
   );
   const leads = result._embedded?.leads || [];
   return leads.filter(lead => {
+    if (hasTag(lead, MERGED_TAG)) return false;
     const leadPhone = extractPhone(lead);
     return leadPhone === phone;
   });
 }
 
-export async function getAllContacts(subdomain: string, accessToken: string): Promise<AmoEntity[]> {
-  let contacts: AmoEntity[] = [];
-  let page = 1;
+// Fetch every page of an amoCRM list endpoint. amoCRM returns max 250 per page;
+// `_links.next` is present while more pages exist and absent on the last page
+// (and a page beyond the data returns 204 → empty body). We stop on either signal.
+async function fetchAllPages(
+  subdomain: string,
+  accessToken: string,
+  path: 'contacts' | 'leads',
+): Promise<AmoEntity[]> {
+  const items: AmoEntity[] = [];
   const limit = 250;
-  let hasMore = true;
-  while (hasMore) {
-    const result = await amoRequest<any>(subdomain, 'get', `/api/v4/contacts?limit=${limit}&page=${page}`, accessToken);
-    const pageContacts = result._embedded?.contacts || [];
-    contacts.push(...pageContacts);
-    hasMore = pageContacts.length === limit;
+  let page = 1;
+  while (true) {
+    const result = await amoRequest<any>(
+      subdomain,
+      'get',
+      `/api/v4/${path}?limit=${limit}&page=${page}`,
+      accessToken,
+    );
+    const pageItems: AmoEntity[] = result?._embedded?.[path] || [];
+    items.push(...pageItems);
+    const hasNext = !!result?._links?.next;
+    if (pageItems.length < limit || !hasNext) break;
     page++;
   }
-  return contacts;
+  return items;
+}
+
+export async function getAllContacts(subdomain: string, accessToken: string): Promise<AmoEntity[]> {
+  const contacts = await fetchAllPages(subdomain, accessToken, 'contacts');
+  return contacts.filter((c) => !hasTag(c, MERGED_TAG));
 }
 
 
@@ -88,8 +237,13 @@ export async function mergeContacts(
   subdomain: string,
   mainId: number,
   duplicateIds: number[],
-  accessToken: string
+  accessToken: string,
+  settings?: ContactSettings,
 ): Promise<void> {
+  if (settings?.isTeg && settings.teg) {
+    await addTag(subdomain, 'contacts', duplicateIds, settings.teg, accessToken);
+    return;
+  }
   for (const dupId of duplicateIds) {
     console.log(`\n==========`);
     console.log(`MERGING CONTACT ${dupId} -> ${mainId}`);
@@ -230,32 +384,8 @@ export async function mergeContacts(
         );
       }
 
-      try {
-        const mergedName =
-          `[MERGED ${new Date()
-            .toISOString()
-            .slice(0, 19)}] ` +
-          (duplicateContact.name || `CONTACT ${dupId}`);
-
-        await amoRequest(
-          subdomain,
-          'patch',
-          `/api/v4/contacts/${dupId}`,
-          accessToken,
-          {
-            name: mergedName
-          }
-        );
-
-        console.log(
-          `Duplicate contact ${dupId} renamed`
-        );
-      } catch (renameErr: any) {
-        console.warn(
-          `Failed to rename duplicate contact ${dupId}:`,
-          renameErr.message
-        );
-      }
+      await addTag(subdomain, 'contacts', [dupId], MERGED_TAG, accessToken);
+      console.log(`Duplicate contact ${dupId} tagged as merged`);
 
       console.log(
         `CONTACT ${dupId} SUCCESSFULLY MERGED`
@@ -281,8 +411,13 @@ export async function mergeLeads(
   subdomain: string,
   mainId: number,
   duplicateIds: number[],
-  accessToken: string
+  accessToken: string,
+  settings?: LeadSettings,
 ): Promise<void> {
+  if (settings?.isTeg && settings.teg) {
+    await addTag(subdomain, 'leads', duplicateIds, settings.teg, accessToken);
+    return;
+  }
   for (const dupId of duplicateIds) {
 
     try {
@@ -392,20 +527,8 @@ export async function mergeLeads(
         console.warn(`Task copy failed: ${e.message}`);
     }
 }
-      const mergedName = `[MERGED ${new Date().toISOString().slice(0, 19)}] ${
-        dupLead.name || `LEAD ${dupId}`
-      }`;
-
-      await amoRequest(
-        subdomain,
-        'patch',
-        `/api/v4/leads/${dupId}`,
-        accessToken,
-        {
-          name: mergedName,
-          _embedded: { contacts: [] }
-        }
-      );
+      await addTag(subdomain, 'leads', [dupId], MERGED_TAG, accessToken);
+      console.log(`Duplicate lead ${dupId} tagged as merged`);
 
     } catch (err: any) {
       console.error(`FAILED MERGE ${dupId}:`, err.message);
@@ -426,26 +549,14 @@ export async function searchLeadsByName(
     accessToken
   );
   const leads = result._embedded?.leads || [];
-  return leads.filter(lead => 
-    lead.name && lead.name.toLowerCase() === name.toLowerCase()
+  return leads.filter(lead =>
+    !hasTag(lead, MERGED_TAG) && lead.name && lead.name.toLowerCase() === name.toLowerCase()
   );
 }
 
 export async function getAllLeads(subdomain: string, accessToken: string): Promise<AmoEntity[]> {
-  let leads: AmoEntity[] = [];
-  let page = 1;
-  const limit = 250;
-  let hasMore = true;
-  while (hasMore) {
-    const result = await amoRequest<any>(subdomain, 'get', `/api/v4/leads?limit=${limit}&page=${page}`, accessToken);
-
-    const pageLeads = result._embedded?.leads || [];
-
-    leads.push(...pageLeads);
-    hasMore = pageLeads.length === limit;
-    page++;
-  }
-  return leads;
+  const leads = await fetchAllPages(subdomain, accessToken, 'leads');
+  return leads.filter((l) => !hasTag(l, MERGED_TAG));
 }
 
 export function groupLeadsByName(leads: AmoEntity[]): Map<string, AmoEntity[]> {
