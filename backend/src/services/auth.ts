@@ -8,24 +8,40 @@ const accountModel = models.Account;
 // Refresh window: refresh if the token expires within this many ms.
 const REFRESH_SKEW_MS = 60_000;
 
-// Exchange the stored refresh_token for a fresh access_token.
-// amoCRM rotates the refresh_token on every call, so we must persist the new one.
-export async function refreshAccessToken(account: AccountModel): Promise<AccountModel> {
-    const tokenUrl = `https://${account.subdomain}.amocrm.ru/oauth2/access_token`;
-    const response = await axios.post(tokenUrl, {
-        client_id: process.env.CLIENT_ID,
-        client_secret: process.env.CLIENT_SECRET,
-        grant_type: 'refresh_token',
-        refresh_token: account.refresh_token,
-        redirect_uri: process.env.REDIRECT_URI,
-    });
+// amoCRM rotates the refresh_token on every refresh, so two concurrent refreshes
+// for the same account would invalidate each other. We de-duplicate by subdomain:
+// concurrent callers share the single in-flight refresh promise.
+const inFlightRefresh = new Map<string, Promise<AccountModel>>();
 
-    await account.update({
-        access_token: response.data.access_token,
-        refresh_token: response.data.refresh_token,
-        expires_at: Date.now() + response.data.expires_in * 1000,
-    });
-    return account;
+// Exchange the stored refresh_token for a fresh access_token.
+export async function refreshAccessToken(account: AccountModel): Promise<AccountModel> {
+    const existing = inFlightRefresh.get(account.subdomain);
+    if (existing) return existing;
+
+    const promise = (async () => {
+        const tokenUrl = `https://${account.subdomain}.amocrm.ru/oauth2/access_token`;
+        const response = await axios.post(tokenUrl, {
+            client_id: process.env.CLIENT_ID,
+            client_secret: process.env.CLIENT_SECRET,
+            grant_type: 'refresh_token',
+            refresh_token: account.refresh_token,
+            redirect_uri: process.env.REDIRECT_URI,
+        });
+
+        await account.update({
+            access_token: response.data.access_token,
+            refresh_token: response.data.refresh_token,
+            expires_at: Date.now() + response.data.expires_in * 1000,
+        });
+        return account;
+    })();
+
+    inFlightRefresh.set(account.subdomain, promise);
+    try {
+        return await promise;
+    } finally {
+        inFlightRefresh.delete(account.subdomain);
+    }
 }
 
 // Return an account with a non-expired access_token, refreshing transparently.

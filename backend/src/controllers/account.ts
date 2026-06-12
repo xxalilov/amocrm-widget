@@ -1,24 +1,22 @@
 import { Request, Response, NextFunction } from 'express';
 
-import { models } from '../utils/database';
-import { getValidAccount } from '../services/auth';
+import { AccountModel } from '../models/account';
 
-const accountModel = models.Account;
-
-export const getAccounts = async (req: Request, res: Response, next: NextFunction) => {
-    try {
-        const accounts = await accountModel.findAll();
-        res.json({ success: true, data: accounts });
-    } catch (error) {
-        next(error);
-    }
+// Public-safe view of an account. Tokens and the widget key must never leave the
+// server — the React client only needs id/subdomain/name.
+function publicAccount(account: AccountModel) {
+    return {
+        id: account.id,
+        name: account.name,
+        subdomain: account.subdomain,
+    };
 }
 
-export const getAccountBySubdomain = async (req: Request<{ subdomain: string }>, res: Response, next: NextFunction) => {
+// Returns the account the request authenticated as (derived from the widget key).
+export const getMe = async (req: Request, res: Response, next: NextFunction) => {
     try {
-        const { subdomain } = req.params;
-        const account = await getValidAccount(subdomain);
-        res.json({ success: true, data: account });
+        const account = req.account!;
+        res.json({ success: true, data: publicAccount(account) });
     } catch (error) {
         next(error);
     }

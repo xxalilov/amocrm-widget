@@ -1,9 +1,8 @@
 import express from 'express';
-import { getAccounts, getAccountBySubdomain } from '../controllers/account';
+import { getMe } from '../controllers/account';
 
 const router = express.Router();
 
-router.get('/:subdomain', getAccountBySubdomain);
-router.get('/', getAccounts);
+router.get('/me', getMe);
 
 export default router;

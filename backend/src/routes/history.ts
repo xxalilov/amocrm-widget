@@ -3,6 +3,6 @@ import { listHistory } from '../controllers/history';
 
 const router = express.Router();
 
-router.get('/:accountId', listHistory);
+router.get('/', listHistory);
 
 export default router;

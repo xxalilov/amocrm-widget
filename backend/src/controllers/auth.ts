@@ -1,18 +1,25 @@
 import { NextFunction, Response, Request } from "express";
 import axios from "axios";
+import { randomBytes } from "crypto";
 import { models } from '../utils/database';
 import { HttpException } from '../exceptions/HttpException';
 
 
 const accountModel = models.Account;
 
+function generateWidgetKey(): string {
+  return randomBytes(24).toString('hex');
+}
+
 export const authInstall = async (req: Request, res: Response, next: NextFunction) => {
   const { subdomain } = req.query;
   if (!subdomain || typeof subdomain !== 'string') {
     return res.status(400).send('subdomain required');
   }
-  const state = JSON.stringify({ subdomain });
-  const authUrl = `https://www.amocrm.ru/oauth2/authorize?client_id=${process.env.CLIENT_ID}&state=${state}&response_type=code&redirect_uri=${process.env.REDIRECT_URI}`;
+  const state = encodeURIComponent(JSON.stringify({ subdomain }));
+  const clientId = encodeURIComponent(process.env.CLIENT_ID || '');
+  const redirectUri = encodeURIComponent(process.env.REDIRECT_URI || '');
+  const authUrl = `https://www.amocrm.ru/oauth2/authorize?client_id=${clientId}&state=${state}&response_type=code&redirect_uri=${redirectUri}`;
   res.redirect(authUrl);
 }
 
@@ -48,28 +55,37 @@ export const authCallback = async (req: Request, res: Response, next: NextFuncti
     });
 
     const existingAccount = await accountModel.findOne({ where: { subdomain } });
+    let account;
     if (existingAccount) {
       await existingAccount.update({
         access_token: response.data.access_token,
         refresh_token: response.data.refresh_token,
-        expires_at: Date.now() + response.data.expires_in * 1000
+        expires_at: Date.now() + response.data.expires_in * 1000,
+        // Keep an existing key; only generate one if missing.
+        widget_key: existingAccount.widget_key || generateWidgetKey(),
       });
+      account = existingAccount;
     } else {
-      await accountModel.create({
+      account = await accountModel.create({
         name: subdomain,
         subdomain,
         access_token: response.data.access_token,
         refresh_token: response.data.refresh_token,
-        expires_at: Date.now() + response.data.expires_in * 1000
+        expires_at: Date.now() + response.data.expires_in * 1000,
+        widget_key: generateWidgetKey(),
       });
     }
 
+    // Show the widget key once, here on the amoCRM-trusted redirect. The admin
+    // pastes it into the widget settings (Integration → settings → API key).
+    const key = account.widget_key;
     res.send(`
       <html>
       <body style="font-family: sans-serif; text-align: center; margin-top: 50px;">
         <h2>✅ Integration successful!</h2>
-        <p><a href="/?account=${subdomain}">Go to duplicate finder</a></p>
-        <script>setTimeout(()=>{ location.href='/?account=${subdomain}'; }, 3000);</script>
+        <p>Paste this API key into the widget settings (field "API key"):</p>
+        <p style="font-family: monospace; font-size: 16px; background:#f4f4f4; padding:10px 14px; display:inline-block; border-radius:6px; user-select:all;">${key}</p>
+        <p style="color:#888; font-size:13px;">Keep it secret. Re-installing the integration shows it again.</p>
       </body>
       </html>
     `);

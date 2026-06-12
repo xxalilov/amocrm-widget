@@ -3,8 +3,8 @@ import { getLeadSettings, updateLeadSettings } from '../controllers/lead-setting
 
 const router = express.Router();
 
-router.get('/:id', getLeadSettings);
+router.get('/', getLeadSettings);
 
-router.put('/:id', updateLeadSettings);
+router.put('/', updateLeadSettings);
 
 export default router;  

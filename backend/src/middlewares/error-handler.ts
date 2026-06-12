@@ -21,7 +21,9 @@ const errorMiddleware = (
     const status: number = error.status || 500;
     const message: string = error.message || "Something went wrong";
 
-    console.log(error);
+    // Log message/stack only. Never log the raw error object — for axios errors
+    // it carries request config including the Bearer token in headers.
+    console.error(`[${status}] ${message}`, error?.stack || '');
 
     res.status(status).json({ status, message });
   } catch (error) {

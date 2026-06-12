@@ -2,12 +2,12 @@ import { Request, Response, NextFunction } from 'express';
 import { models } from '../utils/database';
 
 export const listHistory = async (
-    req: Request<{ accountId: string }>,
+    req: Request,
     res: Response,
     next: NextFunction,
 ) => {
     try {
-        const { accountId } = req.params;
+        const accountId = req.account!.id;
         const rows = await models.MergeHistory.findAll({
             where: { account: accountId },
             order: [['createdAt', 'DESC']],

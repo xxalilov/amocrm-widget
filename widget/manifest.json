@@ -14,6 +14,13 @@
     "settings",
     "widget_page"
   ],
+  "settings": {
+    "api_key": {
+      "name": "API key",
+      "type": "text",
+      "required": true
+    }
+  },
   "left_menu": {
     "logo_locales": {
       "ru": "/images/logo_small.png",

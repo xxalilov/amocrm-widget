@@ -1,7 +1,7 @@
 import { DataTypes, Model, Optional, Sequelize } from "sequelize";
 import { Account } from "../interfaces/account";
 
-export type AccountCreationAttributes = Optional<Account, 'id' | 'expires_at'>;
+export type AccountCreationAttributes = Optional<Account, 'id' | 'expires_at' | 'widget_key'>;
 
 export class AccountModel extends Model<Account, AccountCreationAttributes> implements Account {
     public id: string;
@@ -10,6 +10,7 @@ export class AccountModel extends Model<Account, AccountCreationAttributes> impl
     public access_token: string;
     public refresh_token: string;
     public expires_at: number;
+    public widget_key: string;
 }
 
 export default function (sequelize: Sequelize): typeof AccountModel {
@@ -38,6 +39,13 @@ export default function (sequelize: Sequelize): typeof AccountModel {
         expires_at: {
             type: DataTypes.BIGINT,
             allowNull: true,
+        },
+        // Per-account secret the widget sends as a Bearer token to authenticate
+        // API calls. Generated at install; the account is derived from it.
+        widget_key: {
+            type: DataTypes.STRING,
+            allowNull: true,
+            unique: true,
         },
     }, {
         tableName: 'accounts',

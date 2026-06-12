@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import './App.css';
 
 import Tabs from './components/Tabs';
@@ -6,7 +6,8 @@ import FindDuplicatesTab from './tabs/FindDuplicatesTab';
 import ContactSettingsTab from './tabs/ContactSettingsTab';
 import LeadSettingsTab from './tabs/LeadSettingsTab';
 import HistoryTab from './tabs/HistoryTab';
-import { checkAuth, fetchAccountBySubdomain } from './api/account';
+import { fetchMe } from './api/account';
+import { setApiKey } from './api/client';
 
 const TABS = [
   { id: 'find',     label: 'Find Duplicates' },
@@ -36,72 +37,63 @@ function detectSubdomain() {
 }
 
 export default function App() {
-  const [subdomain, setSubdomain] = useState(() => detectSubdomain());
+  // The widget passes the API key via ?key=… ; persist it for in-app reloads.
+  const [subdomain] = useState(() => detectSubdomain());
   const [account, setAccount] = useState(null);
   const [authRequired, setAuthRequired] = useState(false);
   const [activeTab, setActiveTab] = useState('find');
-  const [loadingAccount, setLoadingAccount] = useState(true);
-
-  const verify = useCallback(async (sd) => {
-    if (!sd) return;
-    try {
-      await checkAuth(sd);
-      setAuthRequired(false);
-      const acc = await fetchAccountBySubdomain(sd);
-      setAccount(acc);
-    } catch (err) {
-      if (err.status === 401 || err.status === 404 || err.status === 400) {
-        setAuthRequired(true);
-      } else {
-        console.error(err);
-      }
-    } finally {
-      setLoadingAccount(false);
-    }
-  }, []);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!subdomain) {
-      setLoadingAccount(false);
-      return;
-    }
-    localStorage.setItem('amocrm_subdomain', subdomain);
-    verify(subdomain);
-  }, [subdomain, verify]);
+    if (subdomain) localStorage.setItem('amocrm_subdomain', subdomain);
+
+    const params = new URLSearchParams(window.location.search);
+    const urlKey = params.get('key');
+    if (urlKey) setApiKey(urlKey);
+
+    // Always ask the backend who we are: with a key in prod, or keyless in dev
+    // (the backend allows it when APP_ENV=dev). A 401 means auth is required.
+    fetchMe()
+      .then((acc) => { setAccount(acc); setAuthRequired(false); })
+      .catch((err) => {
+        if (err.status === 401 || err.status === 404) setAuthRequired(true);
+        else console.error(err);
+      })
+      .finally(() => setLoading(false));
+  }, [subdomain]);
 
   const handleAuth = () => {
-    window.location.href = `/auth/install?subdomain=${encodeURIComponent(subdomain)}`;
+    window.location.href = `/auth/install?subdomain=${encodeURIComponent(subdomain || '')}`;
   };
 
-  if (!subdomain) {
-    return <div className="app app--center">Cannot detect subdomain. Please reload the page.</div>;
-  }
-  if (loadingAccount) {
+  if (loading) {
     return <div className="app app--center">Loading…</div>;
+  }
+
+  if (authRequired || !account) {
+    return (
+      <div className="app app--center">
+        <div className="auth-banner">
+          <span>⚠️ This widget must be opened from amoCRM, and its API key must be set in the widget settings.</span>
+          {subdomain && (
+            <button className="btn btn--primary" onClick={handleAuth} type="button">Connect AmoCRM</button>
+          )}
+        </div>
+      </div>
+    );
   }
 
   return (
     <div className="app">
       <Tabs tabs={TABS} active={activeTab} onChange={setActiveTab} />
 
-      {authRequired && (
-        <div className="auth-banner">
-          <span>⚠️ Integration is not connected. Connect AmoCRM.</span>
-          <button className="btn btn--primary" onClick={handleAuth} type="button">Connect AmoCRM</button>
-        </div>
-      )}
-
       <main className="app__content">
         {activeTab === 'find' && (
-          <FindDuplicatesTab
-            subdomain={subdomain}
-            accountId={account?.id}
-            onAuthRequired={() => setAuthRequired(true)}
-          />
+          <FindDuplicatesTab onAuthRequired={() => setAuthRequired(true)} />
         )}
-        {activeTab === 'contact' && <ContactSettingsTab accountId={account?.id} />}
-        {activeTab === 'lead' && <LeadSettingsTab accountId={account?.id} subdomain={subdomain} />}
-        {activeTab === 'history' && <HistoryTab accountId={account?.id} />}
+        {activeTab === 'contact' && <ContactSettingsTab />}
+        {activeTab === 'lead' && <LeadSettingsTab />}
+        {activeTab === 'history' && <HistoryTab />}
       </main>
     </div>
   );

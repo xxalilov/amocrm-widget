@@ -1,5 +1,4 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import InfoBanner from '../components/InfoBanner';
 import Toggle from '../components/Toggle';
 import { fetchLeadSettings, updateLeadSettings } from '../api/settings';
 import { fetchPipelines } from '../api/pipelines';
@@ -24,7 +23,7 @@ function serializeIds(set) {
   return Array.from(set).join(',');
 }
 
-export default function LeadSettingsTab({ accountId, subdomain }) {
+export default function LeadSettingsTab() {
   const [settings, setSettings] = useState(defaultSettings);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -34,10 +33,9 @@ export default function LeadSettingsTab({ accountId, subdomain }) {
   const [pipelinesError, setPipelinesError] = useState(null);
 
   useEffect(() => {
-    if (!accountId) return;
     let cancelled = false;
     setLoading(true);
-    fetchLeadSettings(accountId)
+    fetchLeadSettings()
       .then((data) => { if (!cancelled) setSettings({ ...defaultSettings, ...data }); })
       .catch((err) => {
         if (err.status === 404) { if (!cancelled) setSettings(defaultSettings); }
@@ -45,14 +43,13 @@ export default function LeadSettingsTab({ accountId, subdomain }) {
       })
       .finally(() => { if (!cancelled) { setLoading(false); setDirty(false); } });
     return () => { cancelled = true; };
-  }, [accountId]);
+  }, []);
 
   useEffect(() => {
-    if (!subdomain) return;
-    fetchPipelines(subdomain)
+    fetchPipelines()
       .then((data) => setPipelines(data || []))
       .catch((err) => setPipelinesError(err.message || 'Failed to load pipelines'));
-  }, [subdomain]);
+  }, []);
 
   const selectedPipelines = useMemo(() => parseIds(settings.checkPipelines), [settings.checkPipelines]);
 
@@ -70,11 +67,10 @@ export default function LeadSettingsTab({ accountId, subdomain }) {
   };
 
   const handleSave = async () => {
-    if (!accountId) return;
     setSaving(true);
     setStatusMsg(null);
     try {
-      const saved = await updateLeadSettings(accountId, settings);
+      const saved = await updateLeadSettings(settings);
       setSettings({ ...defaultSettings, ...saved });
       setDirty(false);
       setStatusMsg({ kind: 'info', text: 'Settings saved' });
@@ -89,7 +85,7 @@ export default function LeadSettingsTab({ accountId, subdomain }) {
 
   return (
     <div className="settings-tab">
-      <InfoBanner>Configure how lead duplicates are detected and merged.</InfoBanner>
+      {/* <InfoBanner>Configure how lead duplicates are detected and merged.</InfoBanner> */}
 
       <div className="toggle-row toggle-row--master">
         <span><strong>Enable lead settings</strong></span>
@@ -133,7 +129,7 @@ export default function LeadSettingsTab({ accountId, subdomain }) {
                     onChange={(e) => togglePipeline(p.id, e.target.checked)}
                   />
                   <span className="pipeline__name">{p.name}</span>
-                  <span className="pipeline__count muted">{p.statuses.length} statuses</span>
+                  <span className="pipeline__count muted">{(p.statuses || []).length} statuses</span>
                 </label>
               );
             })}
@@ -145,15 +141,15 @@ export default function LeadSettingsTab({ accountId, subdomain }) {
           </div>
 
           <div className="toggle-row">
-            <span>Whose data wins</span>
+            <span>Whose data wins (by create date)</span>
             <select
               className="text-input"
               value={settings.advantage}
               disabled={saving}
               onChange={(e) => updateField({ advantage: e.target.value })}
             >
-              <option value="newest">Newest lead</option>
-              <option value="oldest">Oldest lead</option>
+              <option value="newest">Last created</option>
+              <option value="oldest">First created</option>
             </select>
           </div>
 

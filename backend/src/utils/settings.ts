@@ -8,7 +8,7 @@ export const DEFAULT_CONTACT_SETTINGS: ContactSettings = {
     status: 'inactive',
     fields: 'phone',
     isFormatNumber: false,
-    checkNumberLength: 0,
+    checkNumberLength: 9,
     isTeg: false,
     teg: '',
 };

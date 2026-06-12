@@ -1,4 +1,4 @@
 import { api } from './client';
 
-export const fetchPipelines = (subdomain) =>
-  api.get(`/pipelines/${encodeURIComponent(subdomain)}`).then((r) => r.data);
+export const fetchPipelines = () =>
+  api.get('/pipelines').then((r) => r.data);

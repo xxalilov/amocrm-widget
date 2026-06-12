@@ -1,11 +1,13 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import SectionCard from '../components/SectionCard';
 import {
   searchContactsByPhone,
   searchLeadsByName,
-  findAllContactDuplicates,
-  findAllLeadDuplicatesByName,
+  startFindAllContactDuplicates,
+  startFindAllLeadDuplicates,
+  pollJob,
   mergeEntities,
+  startMergeAll,
 } from '../api/duplicates';
 import { fetchContactSettings } from '../api/settings';
 
@@ -25,7 +27,7 @@ const FIELD_LABEL = {
 
 const SINGLE_KEY = '__single__';
 
-export default function FindDuplicatesTab({ subdomain, accountId, onAuthRequired }) {
+export default function FindDuplicatesTab({ onAuthRequired }) {
   const [type, setType] = useState('contact');
   const [contactField, setContactField] = useState('phone');
   const [searchTerm, setSearchTerm] = useState('');
@@ -35,15 +37,19 @@ export default function FindDuplicatesTab({ subdomain, accountId, onAuthRequired
   const [groups, setGroups] = useState([]);
   const [selections, setSelections] = useState({});
   const [statusMsg, setStatusMsg] = useState(null);
+  // Bumped whenever we start a new scan or reset, so a stale poll loop self-cancels.
+  const scanRef = useRef(0);
 
   useEffect(() => {
-    if (!accountId) return;
-    fetchContactSettings(accountId)
-      .then((data) => setContactField(data?.fields || 'phone'))
+    fetchContactSettings()
+      // When contact settings are disabled, the backend matches by phone, so the
+      // search field should reflect that rather than the saved (inactive) field.
+      .then((data) => setContactField(data?.status === 'active' ? (data.fields || 'phone') : 'phone'))
       .catch(() => setContactField('phone'));
-  }, [accountId]);
+  }, []);
 
   const reset = () => {
+    scanRef.current += 1; // cancel any in-flight scan poll
     setDuplicates([]);
     setGroups([]);
     setSelections({});
@@ -79,8 +85,8 @@ export default function FindDuplicatesTab({ subdomain, accountId, onAuthRequired
     setStatusMsg(null);
     try {
       const data = type === 'contact'
-        ? await searchContactsByPhone(subdomain, searchTerm)
-        : await searchLeadsByName(subdomain, searchTerm);
+        ? await searchContactsByPhone(searchTerm)
+        : await searchLeadsByName(searchTerm);
       const items = data.duplicates || [];
       setDuplicates(items);
       setGroups([]);
@@ -95,28 +101,49 @@ export default function FindDuplicatesTab({ subdomain, accountId, onAuthRequired
   };
 
   const handleFindAll = async () => {
+    const scanId = scanRef.current + 1;
+    scanRef.current = scanId;
+    const isCancelled = () => scanRef.current !== scanId;
+
     setLoading(true);
     setMode('all');
-    setStatusMsg(null);
+    setStatusMsg({ kind: 'info', text: 'Starting scan…' });
     try {
-      const data = type === 'contact'
-        ? await findAllContactDuplicates(subdomain)
-        : await findAllLeadDuplicatesByName(subdomain);
-      const gs = data.groups || [];
+      const { jobId } = type === 'contact'
+        ? await startFindAllContactDuplicates()
+        : await startFindAllLeadDuplicates();
+
+      const job = await pollJob(jobId, {
+        shouldCancel: isCancelled,
+        onProgress: (j) => {
+          if (isCancelled()) return;
+          setStatusMsg({
+            kind: 'info',
+            text: j.queued
+              ? 'Queued… (another scan is running)'
+              : `Scanning… ${j.scanned} records checked, ${j.groupsFound} duplicate group(s) so far`,
+          });
+        },
+      });
+
+      if (!job || isCancelled()) return; // cancelled (type switched / reset)
+
+      const gs = job.groups || [];
       setGroups(gs);
       setDuplicates([]);
       const sel = {};
       for (const g of gs) {
-        const key = g.phone || g.name;
+        const key = g.key ?? g.phone ?? g.name;
         sel[key] = g.items[0]?.id;
       }
       setSelections(sel);
-      if (gs.length === 0) setStatusMsg({ kind: 'info', text: 'No duplicates found' });
+      setStatusMsg(gs.length === 0 ? { kind: 'info', text: 'No duplicates found' } : null);
     } catch (err) {
+      if (isCancelled()) return;
       if (err.status === 401) onAuthRequired?.();
       else setStatusMsg({ kind: 'error', text: err.message });
     } finally {
-      setLoading(false);
+      if (!isCancelled()) setLoading(false);
     }
   };
 
@@ -126,8 +153,8 @@ export default function FindDuplicatesTab({ subdomain, accountId, onAuthRequired
     }
     if (mode === 'all') {
       return groups.map((g) => ({
-        key: g.phone || g.name,
-        label: g.phone || g.name,
+        key: g.key ?? g.phone ?? g.name,
+        label: g.phone ?? g.name,
         items: g.items,
       }));
     }
@@ -156,7 +183,7 @@ export default function FindDuplicatesTab({ subdomain, accountId, onAuthRequired
     if (dupIds.length === 0) return;
     if (!window.confirm(`Merge ${dupIds.length} duplicates?`)) return;
     try {
-      await mergeEntities(subdomain, type, mainId, dupIds, buildSnapshot(row.items, mainId));
+      await mergeEntities(type, mainId, dupIds, buildSnapshot(row.items, mainId));
       setStatusMsg({ kind: 'info', text: 'Merged successfully' });
       mode === 'single' ? handleSearch() : handleFindAll();
     } catch (err) {
@@ -166,19 +193,43 @@ export default function FindDuplicatesTab({ subdomain, accountId, onAuthRequired
 
   const mergeAll = async () => {
     if (rows.length === 0) return;
-    if (!window.confirm('Merge ALL groups? (main = most recent)')) return;
+    if (!window.confirm('Merge ALL groups? (main = selected, or the first record in each group)')) return;
+
+    // Build the merge payload, respecting the user's per-row selection and
+    // otherwise the server's suggested main (items[0]).
+    const groups = [];
+    for (const row of rows) {
+      const mainId = selections[row.key] ?? row.items[0]?.id;
+      if (!mainId) continue;
+      const dupIds = row.items.filter((i) => i.id !== mainId).map((i) => i.id);
+      if (dupIds.length === 0) continue;
+      const snap = buildSnapshot(row.items, mainId);
+      groups.push({ mainId, duplicateIds: dupIds, mainName: snap.mainName, duplicates: snap.duplicates });
+    }
+    if (groups.length === 0) return;
+
+    const scanId = scanRef.current + 1;
+    scanRef.current = scanId;
+    const isCancelled = () => scanRef.current !== scanId;
+
     setLoading(true);
+    setStatusMsg({ kind: 'info', text: `Merging 0/${groups.length}…` });
     try {
-      for (const row of rows) {
-        const sorted = [...row.items].sort((a, b) => b.updated_at - a.updated_at);
-        const mainId = sorted[0].id;
-        const dupIds = sorted.slice(1).map((i) => i.id);
-        if (dupIds.length === 0) continue;
-        await mergeEntities(subdomain, type, mainId, dupIds, buildSnapshot(row.items, mainId)).catch(console.error);
-      }
-      setStatusMsg({ kind: 'info', text: 'All groups merged' });
+      const { jobId } = await startMergeAll(type, groups);
+      await pollJob(jobId, {
+        shouldCancel: isCancelled,
+        onProgress: (j) => {
+          if (isCancelled()) return;
+          const failed = j.failed ? `, ${j.failed} failed` : '';
+          setStatusMsg({ kind: 'info', text: `Merging… ${j.processed || 0}/${j.total || groups.length}${failed}` });
+        },
+      });
+      if (isCancelled()) return;
+      // Refresh the list (also resets loading via handleFindAll/handleSearch).
       mode === 'single' ? handleSearch() : handleFindAll();
-    } finally {
+    } catch (err) {
+      if (isCancelled()) return;
+      setStatusMsg({ kind: 'error', text: err.message });
       setLoading(false);
     }
   };

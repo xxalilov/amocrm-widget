@@ -11,7 +11,7 @@ const defaultSettings = {
   teg: '',
 };
 
-export default function ContactSettingsTab({ accountId }) {
+export default function ContactSettingsTab() {
   const [settings, setSettings] = useState(defaultSettings);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -19,10 +19,9 @@ export default function ContactSettingsTab({ accountId }) {
   const [statusMsg, setStatusMsg] = useState(null);
 
   useEffect(() => {
-    if (!accountId) return;
     let cancelled = false;
     setLoading(true);
-    fetchContactSettings(accountId)
+    fetchContactSettings()
       .then((data) => { if (!cancelled) setSettings({ ...defaultSettings, ...data }); })
       .catch((err) => {
         if (err.status === 404) { if (!cancelled) setSettings(defaultSettings); }
@@ -30,7 +29,7 @@ export default function ContactSettingsTab({ accountId }) {
       })
       .finally(() => { if (!cancelled) { setLoading(false); setDirty(false); } });
     return () => { cancelled = true; };
-  }, [accountId]);
+  }, []);
 
   const updateField = (patch) => {
     setSettings((prev) => ({ ...prev, ...patch }));
@@ -39,11 +38,10 @@ export default function ContactSettingsTab({ accountId }) {
   };
 
   const handleSave = async () => {
-    if (!accountId) return;
     setSaving(true);
     setStatusMsg(null);
     try {
-      const saved = await updateContactSettings(accountId, settings);
+      const saved = await updateContactSettings(settings);
       setSettings({ ...defaultSettings, ...saved });
       setDirty(false);
       setStatusMsg({ kind: 'info', text: 'Settings saved' });

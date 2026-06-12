@@ -11,21 +11,20 @@ function formatDate(value) {
   });
 }
 
-export default function HistoryTab({ accountId }) {
+export default function HistoryTab() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    if (!accountId) return;
     let cancelled = false;
     setLoading(true);
-    fetchHistory(accountId)
+    fetchHistory()
       .then((data) => { if (!cancelled) setRows(data || []); })
       .catch((err) => { if (!cancelled) setError(err.message || 'Failed to load history'); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [accountId]);
+  }, []);
 
   if (loading) return <div className="muted">Loading history…</div>;
   if (error) return <div className="status-msg status-msg--error">{error}</div>;

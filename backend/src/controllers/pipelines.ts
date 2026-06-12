@@ -3,13 +3,13 @@ import { getPipelines } from '../services/amoApi';
 import { getValidAccount } from '../services/auth';
 
 export const listPipelines = async (
-    req: Request<{ subdomain: string }>,
+    req: Request,
     res: Response,
     next: NextFunction,
 ) => {
     try {
-        const { subdomain } = req.params;
-        const account = await getValidAccount(subdomain);
+        const account = await getValidAccount(req.account!.subdomain);
+        const subdomain = account.subdomain;
 
         const raw = await getPipelines(subdomain, account.access_token);
 

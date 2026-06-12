@@ -126,33 +126,6 @@ export async function addTag(
   }
 }
 
-// Pick main entity by advantage strategy (used for auto-merge).
-export function pickMainByAdvantage<T extends AmoEntity>(items: T[], advantage: string): T | null {
-  if (items.length === 0) return null;
-  const sorted = [...items].sort((a, b) =>
-    advantage === 'oldest' ? a.updated_at - b.updated_at : b.updated_at - a.updated_at
-  );
-  return sorted[0];
-}
-
-export async function searchContactsByPhone(
-  subdomain: string,
-  phone: string,
-  accessToken: string
-): Promise<AmoEntity[]> {
-  const result = await amoRequest<SearchResult>(
-    subdomain,
-    'get',
-    `/api/v4/contacts?query=${encodeURIComponent(phone)}`,
-    accessToken
-  );
-  const contacts = result._embedded?.contacts || [];
-  return contacts.filter(contact => {
-    const contactPhone = extractPhone(contact);
-    return contactPhone === phone;
-  });
-}
-
 // Settings-aware contact search. Picks the field (phone/email/name) from settings,
 // normalizes both the search term and each candidate via extractContactKey, then matches.
 export async function searchContacts(
@@ -181,45 +154,33 @@ export async function searchContacts(
   return contacts.filter((c) => !hasTag(c, MERGED_TAG) && extractContactKey(c, settings) === key);
 }
 
-export async function searchLeadsByPhone(
-  subdomain: string,
-  phone: string,
-  accessToken: string
-): Promise<AmoEntity[]> {
-  const result = await amoRequest<SearchResult>(
-    subdomain,
-    'get',
-    `/api/v4/leads?query=${encodeURIComponent(phone)}`,
-    accessToken
-  );
-  const leads = result._embedded?.leads || [];
-  return leads.filter(lead => {
-    if (hasTag(lead, MERGED_TAG)) return false;
-    const leadPhone = extractPhone(lead);
-    return leadPhone === phone;
-  });
-}
-
 // Fetch every page of an amoCRM list endpoint. amoCRM returns max 250 per page;
 // `_links.next` is present while more pages exist and absent on the last page
 // (and a page beyond the data returns 204 → empty body). We stop on either signal.
+// `onProgress` (optional) is called after each page with the running total of
+// fetched records, so long scans can report progress to a background job.
 async function fetchAllPages(
   subdomain: string,
   accessToken: string,
   path: 'contacts' | 'leads',
+  onProgress?: (scanned: number) => void,
 ): Promise<AmoEntity[]> {
   const items: AmoEntity[] = [];
   const limit = 250;
   let page = 1;
+  // Leads must be fetched with their linked contacts/companies, otherwise
+  // `_embedded` is empty and duplicate grouping by contact/company finds nothing.
+  const withParam = path === 'leads' ? '&with=contacts,companies' : '';
   while (true) {
     const result = await amoRequest<any>(
       subdomain,
       'get',
-      `/api/v4/${path}?limit=${limit}&page=${page}`,
+      `/api/v4/${path}?limit=${limit}&page=${page}${withParam}`,
       accessToken,
     );
     const pageItems: AmoEntity[] = result?._embedded?.[path] || [];
     items.push(...pageItems);
+    onProgress?.(items.length);
     const hasNext = !!result?._links?.next;
     if (pageItems.length < limit || !hasNext) break;
     page++;
@@ -227,8 +188,12 @@ async function fetchAllPages(
   return items;
 }
 
-export async function getAllContacts(subdomain: string, accessToken: string): Promise<AmoEntity[]> {
-  const contacts = await fetchAllPages(subdomain, accessToken, 'contacts');
+export async function getAllContacts(
+  subdomain: string,
+  accessToken: string,
+  onProgress?: (scanned: number) => void,
+): Promise<AmoEntity[]> {
+  const contacts = await fetchAllPages(subdomain, accessToken, 'contacts', onProgress);
   return contacts.filter((c) => !hasTag(c, MERGED_TAG));
 }
 
@@ -393,8 +358,6 @@ export async function mergeContacts(
 
     } catch (err: any) {
 
-      console.log(err)
-
       console.error(
         `FAILED TO MERGE CONTACT ${dupId}:`,
         err.message
@@ -405,6 +368,44 @@ export async function mergeContacts(
       );
     }
   }
+}
+
+// The "data winner" of two leads by create date, per the advantage setting.
+function leadDataWinner(a: any, b: any, advantage: string): any {
+  const ac = a.created_at ?? 0;
+  const bc = b.created_at ?? 0;
+  // 'oldest' => earliest created wins; 'newest' (default) => latest created wins.
+  if (advantage === 'oldest') return ac <= bc ? a : b;
+  return ac >= bc ? a : b;
+}
+
+// Builds the patch for the surviving main lead: scalar fields and custom fields
+// are taken from the winner, falling back to the loser only where the winner is
+// empty. Returns only the keys that actually differ from the current main.
+function buildLeadFieldUpdate(mainLead: any, dupLead: any, advantage: string): any {
+  const winner = leadDataWinner(mainLead, dupLead, advantage);
+  const loser = winner === mainLead ? dupLead : mainLead;
+  const payload: any = {};
+
+  const name = winner.name || loser.name;
+  if (name && name !== mainLead.name) payload.name = name;
+
+  const price = winner.price || loser.price;
+  if (price && price !== mainLead.price) payload.price = price;
+
+  const responsible = winner.responsible_user_id || loser.responsible_user_id;
+  if (responsible && responsible !== mainLead.responsible_user_id) {
+    payload.responsible_user_id = responsible;
+  }
+
+  // Custom fields: union by field_id, winner takes precedence on conflict.
+  const byId = new Map<any, any>();
+  for (const f of (loser.custom_fields_values || [])) byId.set(f.field_id, f);
+  for (const f of (winner.custom_fields_values || [])) byId.set(f.field_id, f);
+  const merged = [...byId.values()];
+  if (merged.length) payload.custom_fields_values = merged;
+
+  return payload;
 }
 
 export async function mergeLeads(
@@ -435,33 +436,10 @@ export async function mergeLeads(
         accessToken
       );
 
-      const updatePayload: any = {};
-
-      if (!mainLead.name && dupLead.name) {
-        updatePayload.name = dupLead.name;
-      }
-
-      if (!mainLead.price && dupLead.price) {
-        updatePayload.price = dupLead.price;
-      }
-
-      if (!mainLead.responsible_user_id && dupLead.responsible_user_id) {
-        updatePayload.responsible_user_id = dupLead.responsible_user_id;
-      }
-
-      const mainFields = mainLead.custom_fields_values || [];
-      const dupFields = dupLead.custom_fields_values || [];
-
-      const mergedFields = [...mainFields];
-
-      for (const f of dupFields) {
-        const exists = mergedFields.some((x: any) => x.field_id === f.field_id);
-        if (!exists) mergedFields.push(f);
-      }
-
-      if (mergedFields.length) {
-        updatePayload.custom_fields_values = mergedFields;
-      }
+      // Field-value priority: `advantage` picks whose data wins by create date
+      // ('newest' = last created, 'oldest' = first created). The winner's values
+      // overwrite the surviving main lead; the loser only fills what the winner lacks.
+      const updatePayload = buildLeadFieldUpdate(mainLead, dupLead, settings?.advantage || 'newest');
 
       if (Object.keys(updatePayload).length > 0) {
         await amoRequest(
@@ -554,25 +532,12 @@ export async function searchLeadsByName(
   );
 }
 
-export async function getAllLeads(subdomain: string, accessToken: string): Promise<AmoEntity[]> {
-  const leads = await fetchAllPages(subdomain, accessToken, 'leads');
+export async function getAllLeads(
+  subdomain: string,
+  accessToken: string,
+  onProgress?: (scanned: number) => void,
+): Promise<AmoEntity[]> {
+  const leads = await fetchAllPages(subdomain, accessToken, 'leads', onProgress);
   return leads.filter((l) => !hasTag(l, MERGED_TAG));
 }
 
-export function groupLeadsByName(leads: AmoEntity[]): Map<string, AmoEntity[]> {
-  const groups = new Map<string, AmoEntity[]>();
-  for (const lead of leads) {
-    if (!lead.name) continue;
-    const key = lead.name.toLowerCase();
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key)!.push(lead);
-  }
-  const result = new Map<string, AmoEntity[]>();
-  for (const [name, items] of groups.entries()) {
-    if (items.length > 1) {
-      items.sort((a, b) => b.updated_at - a.updated_at);
-      result.set(name, items);
-    }
-  }
-  return result;
-}

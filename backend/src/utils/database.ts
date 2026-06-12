@@ -28,12 +28,14 @@ export const sequelize = new Sequelize(
 );
 
 const DB = async function() {
-    try {
-        await sequelize.sync({force: false});
-        console.log('Database connected successfully');
-    } catch (error) {
-        console.log(error);
-    }
+    await sequelize.authenticate();
+    await sequelize.sync({force: false});
+    // sync({force:false}) creates missing tables but never adds columns to an
+    // existing one. Ensure the widget_key column exists on older databases.
+    await sequelize.query(
+        'ALTER TABLE accounts ADD COLUMN IF NOT EXISTS widget_key VARCHAR UNIQUE'
+    ).catch((err) => console.warn('widget_key column check:', err.message));
+    console.log('Database connected successfully');
 }
 
 const Account = AccountModel(sequelize);

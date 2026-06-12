@@ -3,6 +3,6 @@ import { getContactSettings, updateContactSettings } from '../controllers/contac
 
 const router = express.Router();
 
-router.get('/:id', getContactSettings);
-router.put('/:id', updateContactSettings);
+router.get('/', getContactSettings);
+router.put('/', updateContactSettings);
 export default router;

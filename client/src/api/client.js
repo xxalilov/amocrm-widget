@@ -1,8 +1,31 @@
+// The per-account widget key, used as a Bearer token on every API call. It is
+// delivered to the iframe via the URL (set by the amoCRM widget settings) and
+// cached so it survives in-app reloads.
+let apiKey = null;
+
+export function setApiKey(key) {
+  apiKey = key || null;
+  try {
+    if (key) localStorage.setItem('widget_key', key);
+  } catch (e) {}
+}
+
+export function getApiKey() {
+  if (apiKey) return apiKey;
+  try {
+    return localStorage.getItem('widget_key');
+  } catch (e) {
+    return null;
+  }
+}
+
 async function request(path, options = {}) {
+  const key = getApiKey();
   const res = await fetch(path, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
+      ...(key ? { Authorization: `Bearer ${key}` } : {}),
       ...(options.headers || {}),
     },
   });

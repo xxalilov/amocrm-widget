@@ -1,7 +1,7 @@
 define(['jquery'], function ($) {
   'use strict';
 
-  var APP_URL = 'https://memotrek.app';
+  var APP_URL = 'https://jpeg-von-profiles-composite.trycloudflare.com';
   // ─────────────────────────────────────────────────────────────
 
   var CustomWidget = function () {
@@ -12,7 +12,14 @@ define(['jquery'], function ($) {
       try {
         subdomain = self.system().subdomain || '';
       } catch (e) {}
-      return APP_URL + '/?account=' + encodeURIComponent(subdomain);
+      // The API key is configured in the widget settings (field "API key") and
+      // passed to the iframe, which sends it as a Bearer token on every request.
+      var apiKey = '';
+      try {
+        apiKey = self.get_settings().api_key || '';
+      } catch (e) {}
+      return APP_URL + '/?account=' + encodeURIComponent(subdomain) +
+        '&key=' + encodeURIComponent(apiKey);
     }
 
     function renderIframe($container) {
