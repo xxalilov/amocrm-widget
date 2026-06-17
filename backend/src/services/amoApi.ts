@@ -13,9 +13,13 @@ const httpAgent = new http.Agent({ keepAlive: true, maxSockets: 50 });
 const httpsAgent = new https.Agent({ keepAlive: true, maxSockets: 50 });
 const client = axios.create({ httpAgent, httpsAgent, timeout: 30_000 });
 
-// ~6.2 req/s per account, safely under amoCRM's ~7 req/s cap.
-const limiter = new RateLimiter(160);
+// 6 req/s per account with a burst of 6, safely under amoCRM's ~7 req/s cap.
+// The burst lets paginated scans fetch several pages concurrently.
+const limiter = new RateLimiter(6, 6);
 const MAX_RETRIES = 4;
+
+// How many list pages a scan fetches concurrently (bounded by the rate limiter).
+const SCAN_PAGE_CONCURRENCY = 5;
 
 export async function amoRequest<T>(
   subdomain: string,
@@ -155,10 +159,9 @@ export async function searchContacts(
 }
 
 // Fetch every page of an amoCRM list endpoint. amoCRM returns max 250 per page;
-// `_links.next` is present while more pages exist and absent on the last page
-// (and a page beyond the data returns 204 → empty body). We stop on either signal.
-// `onProgress` (optional) is called after each page with the running total of
-// fetched records, so long scans can report progress to a background job.
+// a page beyond the data returns 204 → empty body. Pages are fetched in
+// concurrent waves (the rate limiter still caps total throughput); a short page
+// marks the end. `onProgress` reports the running total to the background job.
 async function fetchAllPages(
   subdomain: string,
   accessToken: string,
@@ -167,23 +170,32 @@ async function fetchAllPages(
 ): Promise<AmoEntity[]> {
   const items: AmoEntity[] = [];
   const limit = 250;
-  let page = 1;
   // Leads must be fetched with their linked contacts/companies, otherwise
   // `_embedded` is empty and duplicate grouping by contact/company finds nothing.
   const withParam = path === 'leads' ? '&with=contacts,companies' : '';
-  while (true) {
-    const result = await amoRequest<any>(
-      subdomain,
-      'get',
-      `/api/v4/${path}?limit=${limit}&page=${page}${withParam}`,
-      accessToken,
+
+  let page = 1;
+  let done = false;
+  while (!done) {
+    // Fire a wave of consecutive pages at once; the limiter throttles them.
+    const pages = Array.from({ length: SCAN_PAGE_CONCURRENCY }, (_, i) => page + i);
+    const waves = await Promise.all(
+      pages.map((p) =>
+        amoRequest<any>(
+          subdomain,
+          'get',
+          `/api/v4/${path}?limit=${limit}&page=${p}${withParam}`,
+          accessToken,
+        ).then((result) => (result?._embedded?.[path] || []) as AmoEntity[]),
+      ),
     );
-    const pageItems: AmoEntity[] = result?._embedded?.[path] || [];
-    items.push(...pageItems);
+    // Append in page order; a page shorter than the limit means we've reached the end.
+    for (const pageItems of waves) {
+      items.push(...pageItems);
+      if (pageItems.length < limit) done = true;
+    }
     onProgress?.(items.length);
-    const hasNext = !!result?._links?.next;
-    if (pageItems.length < limit || !hasNext) break;
-    page++;
+    page += SCAN_PAGE_CONCURRENCY;
   }
   return items;
 }

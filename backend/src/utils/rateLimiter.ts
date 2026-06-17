@@ -1,30 +1,47 @@
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /**
- * Per-key rate limiter. Requests sharing a key run one-at-a-time, spaced by
- * at least `minIntervalMs`. amoCRM limits each account to ~7 req/s, so we key
- * by subdomain and space requests ~160ms apart (~6.2 req/s, safely under cap).
- * Different keys (accounts) run fully in parallel.
+ * Per-key token-bucket rate limiter. Each key (amoCRM subdomain) refills at
+ * `ratePerSec` tokens/second up to `burst`. A request spends one token; when the
+ * bucket is empty it waits for the next token.
+ *
+ * Unlike a serial chain, this ALLOWS concurrency: if the bucket has N tokens, N
+ * requests proceed at once (a burst), then throughput settles at `ratePerSec`.
+ * amoCRM caps each account at ~7 req/s, so we run at 6/s with a small burst.
+ *
+ * Callers that await each request (merges) stay sequential anyway; only callers
+ * that fire requests together (paginated scans) actually use the concurrency.
  */
 export class RateLimiter {
-    private tail = new Map<string, Promise<unknown>>();
+    private tokens = new Map<string, number>();
     private last = new Map<string, number>();
 
-    constructor(private minIntervalMs: number) {}
+    constructor(private ratePerSec: number, private burst: number) {}
 
-    schedule<T>(key: string, fn: () => Promise<T>): Promise<T> {
-        const prev = this.tail.get(key) ?? Promise.resolve();
-        const run = prev.then(async () => {
-            const wait = this.minIntervalMs - (Date.now() - (this.last.get(key) ?? 0));
-            if (wait > 0) await sleep(wait);
-            try {
-                return await fn();
-            } finally {
-                this.last.set(key, Date.now());
+    // Add tokens for the time elapsed since the last refill; return current count.
+    private refill(key: string): number {
+        const now = Date.now();
+        const last = this.last.get(key) ?? now;
+        const current = this.tokens.get(key) ?? this.burst;
+        const refilled = Math.min(this.burst, current + ((now - last) / 1000) * this.ratePerSec);
+        this.tokens.set(key, refilled);
+        this.last.set(key, now);
+        return refilled;
+    }
+
+    async schedule<T>(key: string, fn: () => Promise<T>): Promise<T> {
+        // Acquire one token. The refill/decrement runs synchronously (no await
+        // between read and write), so concurrent callers can't double-spend.
+        // eslint-disable-next-line no-constant-condition
+        while (true) {
+            const available = this.refill(key);
+            if (available >= 1) {
+                this.tokens.set(key, available - 1);
+                break;
             }
-        });
-        // Keep a non-rejecting tail so one failed request doesn't break the chain.
-        this.tail.set(key, run.then(() => undefined, () => undefined));
-        return run;
+            const waitMs = Math.ceil(((1 - available) / this.ratePerSec) * 1000);
+            await sleep(waitMs);
+        }
+        return fn();
     }
 }
