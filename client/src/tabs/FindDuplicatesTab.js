@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import SectionCard from '../components/SectionCard';
+import ConfirmModal from '../components/ConfirmModal';
 import {
   searchContactsByPhone,
   searchLeadsByName,
@@ -37,6 +38,8 @@ export default function FindDuplicatesTab({ onAuthRequired }) {
   const [groups, setGroups] = useState([]);
   const [selections, setSelections] = useState({});
   const [statusMsg, setStatusMsg] = useState(null);
+  // In-widget confirmation dialog: { message, confirmLabel, onConfirm } or null.
+  const [confirm, setConfirm] = useState(null);
   // Bumped whenever we start a new scan or reset, so a stale poll loop self-cancels.
   const scanRef = useRef(0);
 
@@ -176,12 +179,7 @@ export default function FindDuplicatesTab({ onAuthRequired }) {
     };
   };
 
-  const mergeRow = async (row) => {
-    const mainId = selections[row.key];
-    if (!mainId) return;
-    const dupIds = row.items.filter((i) => i.id !== mainId).map((i) => i.id);
-    if (dupIds.length === 0) return;
-    if (!window.confirm(`Merge ${dupIds.length} duplicates?`)) return;
+  const doMergeRow = async (row, mainId, dupIds) => {
     try {
       await mergeEntities(type, mainId, dupIds, buildSnapshot(row.items, mainId));
       setStatusMsg({ kind: 'info', text: 'Merged successfully' });
@@ -191,9 +189,21 @@ export default function FindDuplicatesTab({ onAuthRequired }) {
     }
   };
 
-  const mergeAll = async () => {
+  const mergeRow = (row) => {
+    const mainId = selections[row.key];
+    if (!mainId) return;
+    const dupIds = row.items.filter((i) => i.id !== mainId).map((i) => i.id);
+    if (dupIds.length === 0) return;
+    const mainName = getName(row.items.find((i) => i.id === mainId), type);
+    setConfirm({
+      message: `Merge ${dupIds.length} duplicate(s) into “${mainName}”?`,
+      confirmLabel: 'Merge',
+      onConfirm: () => { setConfirm(null); doMergeRow(row, mainId, dupIds); },
+    });
+  };
+
+  const mergeAll = () => {
     if (rows.length === 0) return;
-    if (!window.confirm('Merge ALL groups? (main = selected, or the first record in each group)')) return;
 
     // Build the merge payload, respecting the user's per-row selection and
     // otherwise the server's suggested main (items[0]).
@@ -208,6 +218,14 @@ export default function FindDuplicatesTab({ onAuthRequired }) {
     }
     if (groups.length === 0) return;
 
+    setConfirm({
+      message: `Merge ALL ${groups.length} group(s)? Main = the selected record (or the first in each group).`,
+      confirmLabel: 'Merge all',
+      onConfirm: () => { setConfirm(null); doMergeAll(groups); },
+    });
+  };
+
+  const doMergeAll = async (groups) => {
     const scanId = scanRef.current + 1;
     scanRef.current = scanId;
     const isCancelled = () => scanRef.current !== scanId;
@@ -330,6 +348,14 @@ export default function FindDuplicatesTab({ onAuthRequired }) {
           </div>
         </div>
       )}
+
+      <ConfirmModal
+        open={!!confirm}
+        message={confirm?.message}
+        confirmLabel={confirm?.confirmLabel}
+        onConfirm={confirm?.onConfirm}
+        onCancel={() => setConfirm(null)}
+      />
     </div>
   );
 }

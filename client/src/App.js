@@ -43,6 +43,8 @@ export default function App() {
   const [authRequired, setAuthRequired] = useState(false);
   const [activeTab, setActiveTab] = useState('find');
   const [loading, setLoading] = useState(true);
+  const [newKey, setNewKey] = useState(null);   // key returned by the Connect flow
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     if (subdomain) localStorage.setItem('amocrm_subdomain', subdomain);
@@ -50,6 +52,9 @@ export default function App() {
     const params = new URLSearchParams(window.location.search);
     const urlKey = params.get('key');
     if (urlKey) setApiKey(urlKey);
+    // Fallback when the OAuth tab redirects back here directly (popup blocked).
+    const fresh = params.get('new_key');
+    if (fresh) setNewKey(fresh);
 
     // Always ask the backend who we are: with a key in prod, or keyless in dev
     // (the backend allows it when APP_ENV=dev). A 401 means auth is required.
@@ -62,9 +67,44 @@ export default function App() {
       .finally(() => setLoading(false));
   }, [subdomain]);
 
+  // Receive the freshly generated widget key from the OAuth popup (postMessage).
+  useEffect(() => {
+    function onMessage(e) {
+      const data = e.data;
+      if (data && data.type === 'amo_widget_key' && data.key) {
+        setNewKey(data.key);
+        setCopied(false);
+      }
+    }
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, []);
+
   const handleAuth = () => {
-    window.location.href = `${API_BASE}/auth/install?subdomain=${encodeURIComponent(subdomain || '')}`;
+    const url = `${API_BASE}/auth/install?subdomain=${encodeURIComponent(subdomain || '')}`;
+    // amoCRM's OAuth page can't load inside the amoCRM iframe, so open a popup.
+    // The callback posts the key back here; if the popup is blocked, navigate.
+    const popup = window.open(url, 'amo_oauth', 'width=600,height=720');
+    if (!popup) window.location.href = url;
   };
+
+  const copyKey = () => {
+    if (!newKey) return;
+    try { navigator.clipboard.writeText(newKey); setCopied(true); } catch (e) {}
+  };
+
+  const keyBox = newKey && (
+    <div className="key-box">
+      <p className="key-box__title">✅ Connected! Your API key:</p>
+      <code className="key-box__value">{newKey}</code>
+      <button className="btn btn--primary" onClick={copyKey} type="button">
+        {copied ? 'Copied ✓' : 'Copy'}
+      </button>
+      <p className="key-box__hint">
+        Paste it into the widget’s <strong>“API key”</strong> field above and click <strong>Save</strong>.
+      </p>
+    </div>
+  );
 
   if (loading) {
     return <div className="app app--center">Loading…</div>;
@@ -75,10 +115,11 @@ export default function App() {
       <div className="app app--center">
         <div className="auth-banner">
           <span>⚠️ This widget must be opened from amoCRM, and its API key must be set in the widget settings.</span>
-          {subdomain && (
+          {subdomain && !newKey && (
             <button className="btn btn--primary" onClick={handleAuth} type="button">Connect AmoCRM</button>
           )}
         </div>
+        {keyBox}
       </div>
     );
   }

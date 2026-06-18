@@ -77,16 +77,30 @@ export const authCallback = async (req: Request, res: Response, next: NextFuncti
       });
     }
 
-    // Show the widget key once, here on the amoCRM-trusted redirect. The admin
-    // pastes it into the widget settings (Integration → settings → API key).
+    // Hand the widget key back to the widget. This page runs in the OAuth popup
+    // opened by the widget; it posts the key to the opener (the widget shows it
+    // with a Copy button) and closes. It also displays the key as a fallback when
+    // opened directly / when the popup was blocked.
     const key = account.widget_key;
+    // Target the widget's own origin for postMessage (CORS_ORIGIN = SPA origin).
+    const spaOrigin = (process.env.CORS_ORIGIN || '').split(',')[0].trim() || '*';
     res.send(`
       <html>
       <body style="font-family: sans-serif; text-align: center; margin-top: 50px;">
         <h2>✅ Integration successful!</h2>
         <p>Paste this API key into the widget settings (field "API key"):</p>
         <p style="font-family: monospace; font-size: 16px; background:#f4f4f4; padding:10px 14px; display:inline-block; border-radius:6px; user-select:all;">${key}</p>
-        <p style="color:#888; font-size:13px;">Keep it secret. Re-installing the integration shows it again.</p>
+        <button onclick="navigator.clipboard.writeText('${key}')"
+          style="font-size:14px; padding:8px 16px; border:none; border-radius:6px; background:#2b7cff; color:#fff; cursor:pointer;">Copy</button>
+        <p style="color:#888; font-size:13px;">You can close this window and return to the widget.</p>
+        <script>
+          try {
+            if (window.opener) {
+              window.opener.postMessage({ type: 'amo_widget_key', key: '${key}' }, '${spaOrigin}');
+              setTimeout(function () { window.close(); }, 1200);
+            }
+          } catch (e) {}
+        </script>
       </body>
       </html>
     `);
