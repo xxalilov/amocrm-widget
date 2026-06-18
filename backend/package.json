@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "ts-node-dev src/server.ts",
     "build": "tsc",
+    "build:client": "cd ../client && npm install && npm run build",
+    "build:all": "npm run build:client && npm run build",
     "start": "node dist/server.js"
   },
   "keywords": [],

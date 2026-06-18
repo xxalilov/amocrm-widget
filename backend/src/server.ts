@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
+import fs from 'fs';
 import database from './utils/database';
 import errorMiddleware from './middlewares/error-handler';
 import { authenticateWidget } from './middlewares/auth';
@@ -35,7 +36,6 @@ app.use(
   }),
 );
 app.use(express.json());
-app.use(express.static(path.join(__dirname, '../../client/build')));
 
 // /auth (OAuth install + callback) is the only public API surface — it's how an
 // account bootstraps and receives its widget key. Everything else is gated by
@@ -47,9 +47,24 @@ app.use('/contact-settings', authenticateWidget, contactSettingsRoutes);
 app.use('/lead-settings', authenticateWidget, leadSettingsRoutes);
 app.use('/pipelines', authenticateWidget, pipelinesRoutes);
 app.use('/history', authenticateWidget, historyRoutes);
-app.get('/:account', (req, res) => {
-  res.sendFile(path.join(__dirname, '../../client/build', 'index.html'));
+
+// Liveness probe for the container/orchestrator (no auth, no DB call).
+app.get('/health', (req, res) => {
+  res.json({ ok: true });
 });
+
+// Serve the built SPA only when this image actually ships client/build
+// (unified deployment). In the split deployment the SPA lives in a separate
+// nginx image, so the backend image has no client/build and we skip this —
+// non-API paths then 404 cleanly.
+const clientBuild = path.join(__dirname, '../../client/build');
+if (fs.existsSync(path.join(clientBuild, 'index.html'))) {
+  app.use(express.static(clientBuild));
+  app.get('/:account', (req, res) => {
+    res.sendFile(path.join(clientBuild, 'index.html'));
+  });
+}
+
 app.all('/*splat', (req, res) => {
   throw new HttpException(404, 'Not found');
 });

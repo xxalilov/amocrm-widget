@@ -16,10 +16,11 @@ export const authInstall = async (req: Request, res: Response, next: NextFunctio
   if (!subdomain || typeof subdomain !== 'string') {
     return res.status(400).send('subdomain required');
   }
+  // amoCRM's authorization endpoint is /oauth (NOT /oauth2/authorize, which 405s).
+  // The redirect_uri is configured in the integration settings, not passed here.
   const state = encodeURIComponent(JSON.stringify({ subdomain }));
   const clientId = encodeURIComponent(process.env.CLIENT_ID || '');
-  const redirectUri = encodeURIComponent(process.env.REDIRECT_URI || '');
-  const authUrl = `https://www.amocrm.ru/oauth2/authorize?client_id=${clientId}&state=${state}&response_type=code&redirect_uri=${redirectUri}`;
+  const authUrl = `https://www.amocrm.ru/oauth?client_id=${clientId}&state=${state}&mode=post_message`;
   res.redirect(authUrl);
 }
 

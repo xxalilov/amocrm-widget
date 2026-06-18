@@ -7,7 +7,7 @@ import ContactSettingsTab from './tabs/ContactSettingsTab';
 import LeadSettingsTab from './tabs/LeadSettingsTab';
 import HistoryTab from './tabs/HistoryTab';
 import { fetchMe } from './api/account';
-import { setApiKey } from './api/client';
+import { setApiKey, API_BASE } from './api/client';
 
 const TABS = [
   { id: 'find',     label: 'Find Duplicates' },
@@ -63,7 +63,7 @@ export default function App() {
   }, [subdomain]);
 
   const handleAuth = () => {
-    window.location.href = `/auth/install?subdomain=${encodeURIComponent(subdomain || '')}`;
+    window.location.href = `${API_BASE}/auth/install?subdomain=${encodeURIComponent(subdomain || '')}`;
   };
 
   if (loading) {

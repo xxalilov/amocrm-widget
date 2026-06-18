@@ -1,3 +1,8 @@
+// Backend base URL. Empty for the unified deployment (same origin / dev proxy);
+// in the split deployment it's the API origin, baked in at build time via
+// REACT_APP_API_BASE_URL (a Docker build arg for the client image).
+export const API_BASE = (process.env.REACT_APP_API_BASE_URL || '').replace(/\/$/, '');
+
 // The per-account widget key, used as a Bearer token on every API call. It is
 // delivered to the iframe via the URL (set by the amoCRM widget settings) and
 // cached so it survives in-app reloads.
@@ -21,7 +26,7 @@ export function getApiKey() {
 
 async function request(path, options = {}) {
   const key = getApiKey();
-  const res = await fetch(path, {
+  const res = await fetch(API_BASE + path, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
