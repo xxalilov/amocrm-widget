@@ -7,7 +7,7 @@ import ContactSettingsTab from './tabs/ContactSettingsTab';
 import LeadSettingsTab from './tabs/LeadSettingsTab';
 import HistoryTab from './tabs/HistoryTab';
 import { fetchMe } from './api/account';
-import { setApiKey, API_BASE } from './api/client';
+import { setApiKey, setAccountContext, API_BASE } from './api/client';
 
 const TABS = [
   { id: 'find',     label: 'Find Duplicates' },
@@ -36,9 +36,16 @@ function detectSubdomain() {
   return localStorage.getItem('amocrm_subdomain');
 }
 
+// 'mini' = compact card in the marketplace settings popup (just key management);
+// 'full' = the complete app (advanced-settings page / left-menu page).
+function detectView() {
+  return new URLSearchParams(window.location.search).get('view') === 'mini' ? 'mini' : 'full';
+}
+
 export default function App() {
   // The widget passes the API key via ?key=… ; persist it for in-app reloads.
   const [subdomain] = useState(() => detectSubdomain());
+  const [view] = useState(() => detectView());
   const [account, setAccount] = useState(null);
   const [authRequired, setAuthRequired] = useState(false);
   const [activeTab, setActiveTab] = useState('find');
@@ -48,6 +55,9 @@ export default function App() {
 
   useEffect(() => {
     if (subdomain) localStorage.setItem('amocrm_subdomain', subdomain);
+    // Scope the stored key to THIS account before any key read/write, so we never
+    // pick up another account's key from a shared browser (cross-account leak).
+    setAccountContext(subdomain);
 
     const params = new URLSearchParams(window.location.search);
     const urlKey = params.get('key');
@@ -120,6 +130,23 @@ export default function App() {
           )}
         </div>
         {keyBox}
+      </div>
+    );
+  }
+
+  // In the marketplace settings popup we only confirm the connection and point to
+  // the full page (like other marketplace widgets), instead of cramming all the
+  // tabs into the small popup.
+  if (view === 'mini') {
+    return (
+      <div className="app app--center">
+        <div className="connected-card">
+          <p className="connected-card__title">✅ Подключено{account?.name ? ` — ${account.name}` : ''}</p>
+          <p className="connected-card__hint">
+            Откройте <strong>«Поиск и объединение дубликатов»</strong> в разделе{' '}
+            <strong>Настройки</strong> (или в левом меню), чтобы искать и объединять дубликаты.
+          </p>
+        </div>
       </div>
     );
   }

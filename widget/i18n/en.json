@@ -6,5 +6,8 @@
   },
   "settings": {
     "api_key": "API key"
+  },
+  "advanced": {
+    "title": "Duplicate Finder/Merger"
   }
 }

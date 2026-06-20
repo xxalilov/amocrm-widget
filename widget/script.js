@@ -2,8 +2,8 @@ define(['jquery'], function ($) {
   'use strict';
 
   var APP_URL = 'https://deduplicate.upsoft.app';
-  var WIDGET_VERSION = '1.0.7';
   var FRAME_CLASS = 'dedup-frame';
+  var WRAP_CLASS = 'dedup-wrap';
   // ─────────────────────────────────────────────────────────────
 
   // Bulletproof dedup: no matter how many times render() fires, how many times
@@ -13,10 +13,10 @@ define(['jquery'], function ($) {
     if (window.__dedupGuardStarted) return;
     window.__dedupGuardStarted = true;
     setInterval(function () {
-      var frames = $('iframe.' + FRAME_CLASS);
-      if (frames.length > 1) {
+      var wraps = $('.' + WRAP_CLASS);
+      if (wraps.length > 1) {
         // Keep the last (most-recently rendered, in the active view); drop the rest.
-        frames.slice(0, frames.length - 1).remove();
+        wraps.slice(0, wraps.length - 1).remove();
       }
     }, 800);
   }
@@ -24,7 +24,7 @@ define(['jquery'], function ($) {
   var CustomWidget = function () {
     var self = this;
 
-    function appUrl() {
+    function appUrl(full) {
       var subdomain = '';
       try {
         subdomain = self.system().subdomain || '';
@@ -35,8 +35,11 @@ define(['jquery'], function ($) {
       try {
         apiKey = self.get_settings().api_key || '';
       } catch (e) {}
+      // view=full → the complete app (advanced settings page / left-menu page);
+      // view=mini → compact key-management card (the cramped marketplace popup).
       return APP_URL + '/?account=' + encodeURIComponent(subdomain) +
-        '&key=' + encodeURIComponent(apiKey);
+        '&key=' + encodeURIComponent(apiKey) +
+        '&view=' + (full ? 'full' : 'mini');
     }
 
     function widgetCode() {
@@ -54,45 +57,48 @@ define(['jquery'], function ($) {
     //   • settings popup        → #widget_settings_block_<code>
     // We try unique IDs only (never the .widget_settings_block__controls class,
     // which matches multiple nodes and was the source of the duplicate iframe).
+    // Returns { $area, settings }. `settings` is true for the settings-popup
+    // container, false for the full left-menu page — they need different heights.
     function findArea() {
       var code = widgetCode();
-      var sels = [];
       if (code) {
-        sels.push('#work-area-' + code);              // widget_page (left menu)
-        sels.push('#widget_settings_block_' + code);   // settings popup (id form)
+        var wa = $('#work-area-' + code);
+        if (wa.length) return { $area: wa.first(), settings: false };   // widget page
+        var sb = $('#widget_settings_block_' + code);
+        if (sb.length) return { $area: sb.first(), settings: true };    // settings popup
       }
       // The settings popup's real container is the .widget_settings_block__controls
-      // class — it appears more than once, so .first() picks a single node (this
-      // multi-match was the duplicate-iframe cause in the old code).
-      sels.push('.widget_settings_block__controls');
-      sels.push('[id^="work-area-"]');                 // generic fallback
-      for (var i = 0; i < sels.length; i++) {
-        var $a = $(sels[i]).first();
-        if ($a.length) return $a;
-      }
-      return $();
+      // class — it appears more than once, so .first() picks a single node.
+      var ctrl = $('.widget_settings_block__controls');
+      if (ctrl.length) return { $area: ctrl.first(), settings: true };
+      var any = $('[id^="work-area-"]');                                // generic fallback
+      if (any.length) return { $area: any.first(), settings: false };
+      return { $area: $(), settings: false };
     }
 
     // Mount EXACTLY ONE iframe. amoCRM fires render() multiple times, so before
     // injecting we remove any existing .dedup-frame anywhere in the DOM — this
-    // makes a second (stacked) iframe impossible regardless of how often render
-    // runs or how many work-area containers exist. Returns true once mounted,
-    // false if the container isn't in the DOM yet (so polling keeps trying).
+    // makes a second (stacked) iframe impossible. In the settings popup we keep
+    // the iframe short so amoCRM's "Save" button stays reachable below it; on the
+    // full page we use 85vh. Returns false until the container is in the DOM.
     function mount() {
-      var $area = findArea();
+      var found = findArea();
+      var $area = found.$area;
       if (!$area.length) return false;            // container not ready yet
-      // Already exactly one frame, sitting in this container → nothing to do.
-      if ($('iframe.dedup-frame').length === 1 && $area.find('iframe.dedup-frame').length === 1) {
+      // Already exactly one wrapper, sitting in this container → nothing to do.
+      if ($('.' + WRAP_CLASS).length === 1 && $area.find('.' + WRAP_CLASS).length === 1) {
         return true;
       }
-      $('iframe.dedup-frame').remove();           // wipe any stray/duplicate frames
-      // Visible version badge so we can confirm which script version amoCRM
-      // actually loaded (the widget linter forbids logging to the dev tools).
-      $area.html(
-        '<div style="font:11px/1.4 sans-serif;color:#9aa;padding:2px 0 6px;">widget v' + WIDGET_VERSION + '</div>' +
-        '<iframe class="dedup-frame" src="' + appUrl() + '" ' +
-        'style="width:100%;min-height:85vh;border:none;display:block;" ' +
-        'allow="clipboard-write"></iframe>'
+      $('.' + WRAP_CLASS).remove();               // remove only OUR content, not amoCRM's
+      var height = found.settings ? 'min-height:420px;height:420px;' : 'min-height:85vh;';
+      // APPEND (not .html) so we never wipe amoCRM's own controls — the settings
+      // container holds the "Save" button, which .html() would destroy.
+      $area.append(
+        '<div class="' + WRAP_CLASS + '">' +
+        '<iframe class="' + FRAME_CLASS + '" src="' + appUrl(!found.settings) + '" ' +
+        'style="width:100%;' + height + 'border:none;display:block;" ' +
+        'allow="clipboard-write"></iframe>' +
+        '</div>'
       );
       return true;
     }
@@ -129,6 +135,13 @@ define(['jquery'], function ($) {
       // disable→enable cycle, and the dedup guard prevents a second iframe.
       render: function () {
         mountWithRetry(20);   // ~6s of polling
+        return true;
+      },
+
+      // Fires when the widget's page in the Settings section (advanced_settings
+      // location) is opened. Mount the full app into its work-area, same as render.
+      advancedSettings: function () {
+        mountWithRetry(20);
         return true;
       },
 

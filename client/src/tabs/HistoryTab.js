@@ -11,24 +11,30 @@ function formatDate(value) {
   });
 }
 
+const PAGE_SIZE = 50;
+
 export default function HistoryTab() {
   const [rows, setRows] = useState([]);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    fetchHistory()
-      .then((data) => { if (!cancelled) setRows(data || []); })
+    fetchHistory(page, PAGE_SIZE)
+      .then((res) => { if (!cancelled) { setRows(res.rows); setTotal(res.total); } })
       .catch((err) => { if (!cancelled) setError(err.message || 'Failed to load history'); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, []);
+  }, [page]);
+
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   if (loading) return <div className="muted">Loading history…</div>;
   if (error) return <div className="status-msg status-msg--error">{error}</div>;
-  if (rows.length === 0) return <div className="muted" style={{ padding: '12px 0' }}>No operations yet.</div>;
+  if (total === 0) return <div className="muted" style={{ padding: '12px 0' }}>No operations yet.</div>;
 
   return (
     <div className="history-tab">
@@ -69,6 +75,28 @@ export default function HistoryTab() {
           </tbody>
         </table>
       </div>
+
+      {totalPages > 1 && (
+        <div className="pager">
+          <button
+            className="btn"
+            type="button"
+            disabled={page <= 1}
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+          >
+            ← Prev
+          </button>
+          <span className="pager__info">Page {page} of {totalPages} · {total} total</span>
+          <button
+            className="btn"
+            type="button"
+            disabled={page >= totalPages}
+            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+          >
+            Next →
+          </button>
+        </div>
+      )}
     </div>
   );
 }

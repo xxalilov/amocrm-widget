@@ -4,21 +4,40 @@
 export const API_BASE = (process.env.REACT_APP_API_BASE_URL || '').replace(/\/$/, '');
 
 // The per-account widget key, used as a Bearer token on every API call. It is
-// delivered to the iframe via the URL (set by the amoCRM widget settings) and
-// cached so it survives in-app reloads.
+// delivered to the iframe via the URL (set by the amoCRM widget settings).
+//
+// SECURITY: the key MUST be scoped to the current account (subdomain). A single
+// global localStorage key leaks data across accounts — when account B opens the
+// widget in a browser that previously held account A's key, B would silently use
+// A's key and see A's data. So we key storage by subdomain and never fall back to
+// another account's key.
 let apiKey = null;
+let currentSubdomain = null;
+
+// One-time cleanup of the old, unscoped key that caused the cross-account leak.
+try { localStorage.removeItem('widget_key'); } catch (e) {}
+
+export function setAccountContext(subdomain) {
+  currentSubdomain = subdomain || null;
+}
+
+function storageKey() {
+  return currentSubdomain ? `widget_key:${currentSubdomain}` : null;
+}
 
 export function setApiKey(key) {
   apiKey = key || null;
   try {
-    if (key) localStorage.setItem('widget_key', key);
+    const sk = storageKey();
+    if (key && sk) localStorage.setItem(sk, key);
   } catch (e) {}
 }
 
 export function getApiKey() {
   if (apiKey) return apiKey;
   try {
-    return localStorage.getItem('widget_key');
+    const sk = storageKey();
+    return sk ? localStorage.getItem(sk) : null;
   } catch (e) {
     return null;
   }
