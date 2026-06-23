@@ -323,6 +323,36 @@ export const merge = async (req: Request, res: Response, next: NextFunction) => 
     }
 }
 
+// Records a merge that was performed natively in the browser (amoCRM's own
+// frontend merge, run by the widget's script.js over the user's session). The
+// backend never sees that AJAX call, so the client reports it here purely so the
+// History tab stays accurate. No amoCRM API call happens — history only.
+export const mergeLog = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const { type, mainId, duplicateIds, mainName, duplicates: dupSnapshot } = req.body;
+        if ((type !== 'contact' && type !== 'lead') || !mainId) {
+            throw new HttpException(400, 'Missing parameters');
+        }
+        const account = await requireAccount(req.account!.subdomain);
+        const snapshot: { id: number; name: string }[] = Array.isArray(dupSnapshot)
+            ? dupSnapshot
+            : (duplicateIds || []).map((id: number) => ({ id, name: '' }));
+        await recordHistory({
+            accountId: account.id,
+            type,
+            action: 'merge',
+            mainId,
+            mainName,
+            duplicates: snapshot,
+            tag: '',
+        });
+        return res.json({ success: true });
+    } catch (err: any) {
+        console.error('Merge log error:', err.message);
+        next(err);
+    }
+}
+
 interface MergeGroupInput {
     mainId: number;
     duplicateIds: number[];

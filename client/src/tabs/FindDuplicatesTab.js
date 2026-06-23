@@ -9,8 +9,11 @@ import {
   pollJob,
   mergeEntities,
   startMergeAll,
+  canNativeMerge,
+  nativeMergeViaHost,
+  logMerge,
 } from '../api/duplicates';
-import { fetchContactSettings } from '../api/settings';
+import { fetchContactSettings, fetchLeadSettings } from '../api/settings';
 
 function getName(item, type) {
   if (item.name) return item.name;
@@ -40,14 +43,35 @@ export default function FindDuplicatesTab({ onAuthRequired }) {
   const [confirm, setConfirm] = useState(null);
   // Bumped whenever we start a new scan or reset, so a stale poll loop self-cancels.
   const scanRef = useRef(0);
+  // Whether each entity is in "tag instead of merge" mode. Tag mode stays on the
+  // backend (OAuth); real merge goes through the host's native merge bridge.
+  const tagMode = useRef({ contact: false, lead: false });
 
   useEffect(() => {
     fetchContactSettings()
       // When contact settings are disabled, the backend matches by phone, so the
       // search field should reflect that rather than the saved (inactive) field.
-      .then((data) => setContactField(data?.status === 'active' ? (data.fields || 'phone') : 'phone'))
+      .then((data) => {
+        setContactField(data?.status === 'active' ? (data.fields || 'phone') : 'phone');
+        tagMode.current.contact = !!(data?.status === 'active' && data?.isTeg);
+      })
       .catch(() => setContactField('phone'));
+    fetchLeadSettings()
+      .then((data) => { tagMode.current.lead = !!(data?.status === 'active' && data?.isTeg); })
+      .catch(() => {});
   }, []);
+
+  // Perform one group's merge: tag-mode (or non-embedded fallback) goes through
+  // the backend; otherwise run amoCRM's native merge via the host, then log it so
+  // the History tab stays accurate.
+  const runMerge = async (mainId, dupIds, snapshot) => {
+    if (tagMode.current[type] || !canNativeMerge()) {
+      await mergeEntities(type, mainId, dupIds, snapshot);
+      return;
+    }
+    await nativeMergeViaHost(type, mainId, dupIds);
+    await logMerge(type, mainId, dupIds, snapshot).catch(() => {});
+  };
 
   const reset = () => {
     scanRef.current += 1; // cancel any in-flight scan poll
@@ -179,7 +203,7 @@ export default function FindDuplicatesTab({ onAuthRequired }) {
 
   const doMergeRow = async (row, mainId, dupIds) => {
     try {
-      await mergeEntities(type, mainId, dupIds, buildSnapshot(row.items, mainId));
+      await runMerge(mainId, dupIds, buildSnapshot(row.items, mainId));
       setStatusMsg({ kind: 'info', text: 'Успешно объединено' });
       mode === 'single' ? handleSearch() : handleFindAll();
     } catch (err) {
@@ -230,6 +254,30 @@ export default function FindDuplicatesTab({ onAuthRequired }) {
 
     setLoading(true);
     setStatusMsg({ kind: 'info', text: `Объединение 0/${groups.length}…` });
+
+    // Native merge runs one group at a time through the host bridge, so we loop
+    // here (the backend job below is only for tag-mode / non-embedded fallback).
+    if (!tagMode.current[type] && canNativeMerge()) {
+      let processed = 0;
+      let failed = 0;
+      for (const g of groups) {
+        if (isCancelled()) return;
+        try {
+          await nativeMergeViaHost(type, g.mainId, g.duplicateIds);
+          await logMerge(type, g.mainId, g.duplicateIds, { mainName: g.mainName, duplicates: g.duplicates }).catch(() => {});
+        } catch (e) {
+          failed += 1;
+        }
+        processed += 1;
+        if (isCancelled()) return;
+        const failedMsg = failed ? `, ошибок: ${failed}` : '';
+        setStatusMsg({ kind: 'info', text: `Объединение… ${processed}/${groups.length}${failedMsg}` });
+      }
+      if (isCancelled()) return;
+      mode === 'single' ? handleSearch() : handleFindAll();
+      return;
+    }
+
     try {
       const { jobId } = await startMergeAll(type, groups);
       await pollJob(jobId, {

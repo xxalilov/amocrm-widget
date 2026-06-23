@@ -38,8 +38,57 @@ export async function pollJob(jobId, { onProgress, intervalMs = 1500, shouldCanc
 }
 
 // Single-group merge (one row) — fast, runs synchronously on the server.
+// Used for tag-mode and as a fallback when not embedded (see native merge below).
 export const mergeEntities = (type, mainId, duplicateIds, snapshot = {}) =>
   api.post('/api/merge', { type, mainId, duplicateIds, ...snapshot });
+
+// ── Native (штатный) merge bridge ─────────────────────────────────────────
+// amoCRM's real merge runs only on the amoCRM origin via the logged-in session,
+// so the backend can't call it. When we're embedded in the widget iframe we ask
+// the host (widget/script.js) to perform it and await the result over
+// postMessage. See native-merge-protocol.
+const NATIVE_TIMEOUT_MS = 120000;
+let nativeReqSeq = 0;
+const nativePending = new Map();
+
+export const canNativeMerge = () => {
+  try { return !!window.parent && window.parent !== window; } catch (e) { return false; }
+};
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('message', (ev) => {
+    const msg = ev.data;
+    if (!msg || msg.source !== 'dedup-host') return;
+    const p = nativePending.get(msg.reqId);
+    if (!p) return;
+    nativePending.delete(msg.reqId);
+    clearTimeout(p.timer);
+    if (msg.ok) p.resolve();
+    else p.reject(new Error(msg.error || 'Не удалось объединить'));
+  });
+}
+
+// Ask the host to merge `mainId` + `duplicateIds` natively. `ids` sent to the
+// host must include the surviving record.
+export function nativeMergeViaHost(type, mainId, duplicateIds) {
+  return new Promise((resolve, reject) => {
+    if (!canNativeMerge()) { reject(new Error('Виджет не встроен в amoCRM')); return; }
+    const reqId = `m${++nativeReqSeq}_${Math.round(performance.now())}`;
+    const timer = setTimeout(() => {
+      nativePending.delete(reqId);
+      reject(new Error('Хост виджета не ответил'));
+    }, NATIVE_TIMEOUT_MS);
+    nativePending.set(reqId, { resolve, reject, timer });
+    const ids = [mainId, ...duplicateIds].map(String);
+    // targetOrigin '*' is safe here — the payload is only entity ids, and the
+    // host validates the message origin before acting.
+    window.parent.postMessage({ source: 'dedup-spa', action: 'merge', reqId, type, mainId, ids }, '*');
+  });
+}
+
+// Record a natively-performed merge in history (backend isn't otherwise involved).
+export const logMerge = (type, mainId, duplicateIds, snapshot = {}) =>
+  api.post('/api/merge/log', { type, mainId, duplicateIds, ...snapshot });
 
 // Merge many groups in the background; returns { jobId }. Poll with pollJob.
 // `groups`: [{ mainId, duplicateIds, mainName, duplicates }]
