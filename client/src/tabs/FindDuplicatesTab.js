@@ -15,16 +15,14 @@ import { fetchContactSettings } from '../api/settings';
 function getName(item, type) {
   if (item.name) return item.name;
   if (type === 'contact') {
-    return `${item.first_name || ''} ${item.last_name || ''}`.trim() || `Contact #${item.id}`;
+    return `${item.first_name || ''} ${item.last_name || ''}`.trim() || `Контакт #${item.id}`;
   }
-  return `Lead #${item.id}`;
+  return `Сделка #${item.id}`;
 }
 
-const FIELD_LABEL = {
-  phone: 'phone',
-  email: 'email',
-  name: 'name',
-};
+// Prepositional case for «Поиск по …», accusative for «Введите …».
+const FIELD_PREP = { phone: 'телефону', email: 'email', name: 'имени' };
+const FIELD_ACC = { phone: 'телефон', email: 'email', name: 'имя' };
 
 const SINGLE_KEY = '__single__';
 
@@ -66,20 +64,20 @@ export default function FindDuplicatesTab({ onAuthRequired }) {
   };
 
   const placeholder = useMemo(() => {
-    if (type === 'lead') return 'Lead name';
-    return `Search by ${FIELD_LABEL[contactField]}`;
+    if (type === 'lead') return 'Название сделки';
+    return `Поиск по ${FIELD_PREP[contactField]}`;
   }, [type, contactField]);
 
   const searchButtonLabel = useMemo(() => {
-    if (type === 'lead') return 'Search by name';
-    return `Search by ${FIELD_LABEL[contactField]}`;
+    if (type === 'lead') return 'Поиск по имени';
+    return `Поиск по ${FIELD_PREP[contactField]}`;
   }, [type, contactField]);
 
   const handleSearch = async () => {
     if (!searchTerm.trim()) {
       setStatusMsg({
         kind: 'error',
-        text: type === 'contact' ? `Enter ${FIELD_LABEL[contactField]}` : 'Enter lead name',
+        text: type === 'contact' ? `Введите ${FIELD_ACC[contactField]}` : 'Введите название сделки',
       });
       return;
     }
@@ -94,7 +92,7 @@ export default function FindDuplicatesTab({ onAuthRequired }) {
       setDuplicates(items);
       setGroups([]);
       setSelections(items[0] ? { [SINGLE_KEY]: items[0].id } : {});
-      if (items.length === 0) setStatusMsg({ kind: 'info', text: 'No duplicates found' });
+      if (items.length === 0) setStatusMsg({ kind: 'info', text: 'Дубликаты не найдены' });
     } catch (err) {
       if (err.status === 401) onAuthRequired?.();
       else setStatusMsg({ kind: 'error', text: err.message });
@@ -110,7 +108,7 @@ export default function FindDuplicatesTab({ onAuthRequired }) {
 
     setLoading(true);
     setMode('all');
-    setStatusMsg({ kind: 'info', text: 'Starting scan…' });
+    setStatusMsg({ kind: 'info', text: 'Запуск сканирования…' });
     try {
       const { jobId } = type === 'contact'
         ? await startFindAllContactDuplicates()
@@ -123,8 +121,8 @@ export default function FindDuplicatesTab({ onAuthRequired }) {
           setStatusMsg({
             kind: 'info',
             text: j.queued
-              ? 'Queued… (another scan is running)'
-              : `Scanning… ${j.scanned} records checked, ${j.groupsFound} duplicate group(s) so far`,
+              ? 'В очереди… (выполняется другое сканирование)'
+              : `Сканирование… проверено ${j.scanned} записей, найдено групп дублей: ${j.groupsFound}`,
           });
         },
       });
@@ -140,7 +138,7 @@ export default function FindDuplicatesTab({ onAuthRequired }) {
         sel[key] = g.items[0]?.id;
       }
       setSelections(sel);
-      setStatusMsg(gs.length === 0 ? { kind: 'info', text: 'No duplicates found' } : null);
+      setStatusMsg(gs.length === 0 ? { kind: 'info', text: 'Дубликаты не найдены' } : null);
     } catch (err) {
       if (isCancelled()) return;
       if (err.status === 401) onAuthRequired?.();
@@ -182,7 +180,7 @@ export default function FindDuplicatesTab({ onAuthRequired }) {
   const doMergeRow = async (row, mainId, dupIds) => {
     try {
       await mergeEntities(type, mainId, dupIds, buildSnapshot(row.items, mainId));
-      setStatusMsg({ kind: 'info', text: 'Merged successfully' });
+      setStatusMsg({ kind: 'info', text: 'Успешно объединено' });
       mode === 'single' ? handleSearch() : handleFindAll();
     } catch (err) {
       setStatusMsg({ kind: 'error', text: err.message });
@@ -196,8 +194,8 @@ export default function FindDuplicatesTab({ onAuthRequired }) {
     if (dupIds.length === 0) return;
     const mainName = getName(row.items.find((i) => i.id === mainId), type);
     setConfirm({
-      message: `Merge ${dupIds.length} duplicate(s) into “${mainName}”?`,
-      confirmLabel: 'Merge',
+      message: `Объединить дубликаты (${dupIds.length}) в «${mainName}»?`,
+      confirmLabel: 'Объединить',
       onConfirm: () => { setConfirm(null); doMergeRow(row, mainId, dupIds); },
     });
   };
@@ -219,8 +217,8 @@ export default function FindDuplicatesTab({ onAuthRequired }) {
     if (groups.length === 0) return;
 
     setConfirm({
-      message: `Merge ALL ${groups.length} group(s)? Main = the selected record (or the first in each group).`,
-      confirmLabel: 'Merge all',
+      message: `Объединить ВСЕ группы (${groups.length})? Основная — выбранная запись (или первая в каждой группе).`,
+      confirmLabel: 'Объединить все',
       onConfirm: () => { setConfirm(null); doMergeAll(groups); },
     });
   };
@@ -231,15 +229,15 @@ export default function FindDuplicatesTab({ onAuthRequired }) {
     const isCancelled = () => scanRef.current !== scanId;
 
     setLoading(true);
-    setStatusMsg({ kind: 'info', text: `Merging 0/${groups.length}…` });
+    setStatusMsg({ kind: 'info', text: `Объединение 0/${groups.length}…` });
     try {
       const { jobId } = await startMergeAll(type, groups);
       await pollJob(jobId, {
         shouldCancel: isCancelled,
         onProgress: (j) => {
           if (isCancelled()) return;
-          const failed = j.failed ? `, ${j.failed} failed` : '';
-          setStatusMsg({ kind: 'info', text: `Merging… ${j.processed || 0}/${j.total || groups.length}${failed}` });
+          const failed = j.failed ? `, ошибок: ${j.failed}` : '';
+          setStatusMsg({ kind: 'info', text: `Объединение… ${j.processed || 0}/${j.total || groups.length}${failed}` });
         },
       });
       if (isCancelled()) return;
@@ -252,19 +250,19 @@ export default function FindDuplicatesTab({ onAuthRequired }) {
     }
   };
 
-  const headerLabel = type === 'contact' ? 'Contacts' : 'Leads';
+  const headerLabel = type === 'contact' ? 'Контакты' : 'Сделки';
 
   return (
     <div className="find-tab">
-      <SectionCard title="Find duplicates">
+      <SectionCard title="Поиск дублей">
         <div className="find-form">
           <select
             className="find-form__select"
             value={type}
             onChange={(e) => handleType(e.target.value)}
           >
-            <option value="contact">Contact</option>
-            <option value="lead">Lead</option>
+            <option value="contact">Контакт</option>
+            <option value="lead">Сделка</option>
           </select>
           <input
             className="find-form__input"
@@ -278,7 +276,7 @@ export default function FindDuplicatesTab({ onAuthRequired }) {
             {searchButtonLabel}
           </button>
           <button className="btn btn--dark" onClick={handleFindAll} disabled={loading} type="button">
-            Find all duplicates
+            Найти все дубли
           </button>
         </div>
       </SectionCard>
@@ -287,7 +285,7 @@ export default function FindDuplicatesTab({ onAuthRequired }) {
         <div className={`status-msg status-msg--${statusMsg.kind}`}>{statusMsg.text}</div>
       )}
 
-      {loading && <div className="muted" style={{ padding: '12px 0' }}>Loading…</div>}
+      {loading && <div className="muted" style={{ padding: '12px 0' }}>Загрузка…</div>}
 
       {rows.length > 0 && (
         <div className="dup-table-wrap">
@@ -302,7 +300,7 @@ export default function FindDuplicatesTab({ onAuthRequired }) {
                     disabled={loading}
                     type="button"
                   >
-                    MERGE ALL
+                    ОБЪЕДИНИТЬ ВСЕ
                   </button>
                 </th>
               </tr>
@@ -335,7 +333,7 @@ export default function FindDuplicatesTab({ onAuthRequired }) {
                         disabled={loading || row.items.length < 2}
                         type="button"
                       >
-                        MERGE
+                        ОБЪЕДИНИТЬ
                       </button>
                     </td>
                   </tr>
@@ -344,7 +342,7 @@ export default function FindDuplicatesTab({ onAuthRequired }) {
             </tbody>
           </table>
           <div className="muted dup-table__hint">
-            Click a cell to set it as the main record (highlighted with green border).
+            Нажмите на ячейку, чтобы сделать запись основной (выделяется зелёной рамкой).
           </div>
         </div>
       )}

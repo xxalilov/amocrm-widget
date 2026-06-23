@@ -5,7 +5,7 @@ function formatDate(value) {
   if (!value) return '—';
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return '—';
-  return d.toLocaleString('en-GB', {
+  return d.toLocaleString('ru-RU', {
     year: 'numeric', month: '2-digit', day: '2-digit',
     hour: '2-digit', minute: '2-digit',
   });
@@ -32,9 +32,9 @@ export default function HistoryTab() {
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
-  if (loading) return <div className="muted">Loading history…</div>;
+  if (loading) return <div className="muted">Загрузка истории…</div>;
   if (error) return <div className="status-msg status-msg--error">{error}</div>;
-  if (total === 0) return <div className="muted" style={{ padding: '12px 0' }}>No operations yet.</div>;
+  if (total === 0) return <div className="muted" style={{ padding: '12px 0' }}>Операций пока нет.</div>;
 
   return (
     <div className="history-tab">
@@ -42,22 +42,22 @@ export default function HistoryTab() {
         <table className="dup-table history-table">
           <thead>
             <tr>
-              <th>Date</th>
-              <th>Type</th>
-              <th>Action</th>
-              <th>Main</th>
-              <th>Duplicates</th>
+              <th>Дата</th>
+              <th>Тип</th>
+              <th>Действие</th>
+              <th>Основная</th>
+              <th>Дубликаты</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((r) => (
               <tr key={r.id}>
                 <td>{formatDate(r.createdAt)}</td>
-                <td>{r.type === 'contact' ? 'Contact' : 'Lead'}</td>
+                <td>{r.type === 'contact' ? 'Контакт' : 'Сделка'}</td>
                 <td>
                   {r.action === 'tag'
-                    ? <span className="badge badge--tag">Tagged{r.tag ? `: ${r.tag}` : ''}</span>
-                    : <span className="badge badge--merge">Merged</span>}
+                    ? <span className="badge badge--tag">Тег{r.tag ? `: ${r.tag}` : ''}</span>
+                    : <span className="badge badge--merge">Объединено</span>}
                 </td>
                 <td>
                   <div className="history-main">{r.mainName || `#${r.mainId}`}</div>
@@ -84,16 +84,16 @@ export default function HistoryTab() {
             disabled={page <= 1}
             onClick={() => setPage((p) => Math.max(1, p - 1))}
           >
-            ← Prev
+            ← Назад
           </button>
-          <span className="pager__info">Page {page} of {totalPages} · {total} total</span>
+          <span className="pager__info">Страница {page} из {totalPages} · всего {total}</span>
           <button
             className="btn"
             type="button"
             disabled={page >= totalPages}
             onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
           >
-            Next →
+            Вперёд →
           </button>
         </div>
       )}

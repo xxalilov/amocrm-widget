@@ -44,20 +44,20 @@ export default function ContactSettingsTab() {
       const saved = await updateContactSettings(settings);
       setSettings({ ...defaultSettings, ...saved });
       setDirty(false);
-      setStatusMsg({ kind: 'info', text: 'Settings saved' });
+      setStatusMsg({ kind: 'info', text: 'Настройки сохранены' });
     } catch (err) {
-      setStatusMsg({ kind: 'error', text: err.message || 'Save failed' });
+      setStatusMsg({ kind: 'error', text: err.message || 'Не удалось сохранить' });
     } finally {
       setSaving(false);
     }
   };
 
-  if (loading) return <div className="muted">Loading settings…</div>;
+  if (loading) return <div className="muted">Загрузка настроек…</div>;
 
   return (
     <div className="settings-tab">
       <div className="toggle-row toggle-row--master">
-        <span><strong>Enable contact settings</strong></span>
+        <span><strong>Включить настройки контактов</strong></span>
         <Toggle
           checked={settings.status === 'active'}
           disabled={saving}
@@ -68,23 +68,23 @@ export default function ContactSettingsTab() {
       {settings.status === 'active' && (
         <>
           <div className="toggle-row">
-            <span>Comparison field</span>
+            <span>Поле для сравнения</span>
             <select
               className="text-input"
               value={settings.fields}
               disabled={saving}
               onChange={(e) => updateField({ fields: e.target.value })}
             >
-              <option value="phone">Phone</option>
+              <option value="phone">Телефон</option>
               <option value="email">Email</option>
-              <option value="name">Name</option>
+              <option value="name">Имя</option>
             </select>
           </div>
 
           {settings.fields === 'phone' && (
             <>
               <div className="toggle-row">
-                <span>Normalize phone number before comparison</span>
+                <span>Нормализовать номер телефона перед сравнением</span>
                 <Toggle
                   checked={settings.isFormatNumber}
                   disabled={saving}
@@ -94,7 +94,7 @@ export default function ContactSettingsTab() {
 
               {settings.isFormatNumber && (
                 <div className="toggle-row">
-                  <span>Phone digits to check (last N)</span>
+                  <span>Сколько последних цифр сравнивать</span>
                   <input
                     type="number"
                     className="number-input"
@@ -108,7 +108,7 @@ export default function ContactSettingsTab() {
           )}
 
           <div className="toggle-row">
-            <span>Add tag instead of merging</span>
+            <span>Добавлять тег вместо объединения</span>
             <Toggle
               checked={settings.isTeg}
               disabled={saving}
@@ -118,14 +118,14 @@ export default function ContactSettingsTab() {
 
           {settings.isTeg && (
             <div className="toggle-row">
-              <span>Tag name</span>
+              <span>Название тега</span>
               <input
                 type="text"
                 className="text-input"
                 value={settings.teg}
                 disabled={saving}
                 onChange={(e) => updateField({ teg: e.target.value })}
-                placeholder="duplicate"
+                placeholder="дубль"
               />
             </div>
           )}
@@ -143,9 +143,9 @@ export default function ContactSettingsTab() {
           disabled={saving || !dirty}
           type="button"
         >
-          {saving ? 'Saving…' : 'Save'}
+          {saving ? 'Сохранение…' : 'Сохранить'}
         </button>
-        {dirty && !saving && <span className="muted">You have unsaved changes</span>}
+        {dirty && !saving && <span className="muted">Есть несохранённые изменения</span>}
       </div>
     </div>
   );

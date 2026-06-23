@@ -73,22 +73,22 @@ export default function LeadSettingsTab() {
       const saved = await updateLeadSettings(settings);
       setSettings({ ...defaultSettings, ...saved });
       setDirty(false);
-      setStatusMsg({ kind: 'info', text: 'Settings saved' });
+      setStatusMsg({ kind: 'info', text: 'Настройки сохранены' });
     } catch (err) {
-      setStatusMsg({ kind: 'error', text: err.message || 'Save failed' });
+      setStatusMsg({ kind: 'error', text: err.message || 'Не удалось сохранить' });
     } finally {
       setSaving(false);
     }
   };
 
-  if (loading) return <div className="muted">Loading settings…</div>;
+  if (loading) return <div className="muted">Загрузка настроек…</div>;
 
   return (
     <div className="settings-tab">
       {/* <InfoBanner>Configure how lead duplicates are detected and merged.</InfoBanner> */}
 
       <div className="toggle-row toggle-row--master">
-        <span><strong>Enable lead settings</strong></span>
+        <span><strong>Включить настройки сделок</strong></span>
         <Toggle
           checked={settings.status === 'active'}
           disabled={saving}
@@ -99,25 +99,25 @@ export default function LeadSettingsTab() {
       {settings.status === 'active' && (
         <>
           <div className="toggle-row">
-            <span>Find duplicates by</span>
+            <span>Искать дубли по</span>
             <select
               className="text-input"
               value={settings.findDublicatesBy}
               disabled={saving}
               onChange={(e) => updateField({ findDublicatesBy: e.target.value })}
             >
-              <option value="byContact">Contact</option>
-              <option value="byCompany">Company</option>
+              <option value="byContact">Контакту</option>
+              <option value="byCompany">Компании</option>
             </select>
           </div>
 
           <div className="pipelines-block">
-            <div className="pipelines-block__title">Check only leads in these pipelines</div>
+            <div className="pipelines-block__title">Проверять сделки только в этих воронках</div>
             {pipelinesError && (
               <div className="status-msg status-msg--error">{pipelinesError}</div>
             )}
             {pipelines.length === 0 && !pipelinesError && (
-              <div className="muted" style={{ padding: '8px 0' }}>Loading pipelines…</div>
+              <div className="muted" style={{ padding: '8px 0' }}>Загрузка воронок…</div>
             )}
             {pipelines.map((p) => {
               const checked = selectedPipelines.has(String(p.id));
@@ -129,45 +129,45 @@ export default function LeadSettingsTab() {
                     onChange={(e) => togglePipeline(p.id, e.target.checked)}
                   />
                   <span className="pipeline__name">{p.name}</span>
-                  <span className="pipeline__count muted">{(p.statuses || []).length} statuses</span>
+                  <span className="pipeline__count muted">этапов: {(p.statuses || []).length}</span>
                 </label>
               );
             })}
             {selectedPipelines.size === 0 && pipelines.length > 0 && (
               <div className="muted" style={{ padding: '6px 0 0' }}>
-                No pipelines selected — all leads will be checked.
+                Воронки не выбраны — будут проверены все сделки.
               </div>
             )}
           </div>
 
           <div className="toggle-row">
-            <span>Whose data wins (by create date)</span>
+            <span>Чьи данные приоритетны (по дате создания)</span>
             <select
               className="text-input"
               value={settings.advantage}
               disabled={saving}
               onChange={(e) => updateField({ advantage: e.target.value })}
             >
-              <option value="newest">Last created</option>
-              <option value="oldest">First created</option>
+              <option value="newest">Созданной последней</option>
+              <option value="oldest">Созданной первой</option>
             </select>
           </div>
 
           <div className="toggle-row">
-            <span>Keep lead by create date</span>
+            <span>Какую сделку оставить (по дате создания)</span>
             <select
               className="text-input"
               value={settings.remainsStatus}
               disabled={saving}
               onChange={(e) => updateField({ remainsStatus: e.target.value })}
             >
-              <option value="first">First created</option>
-              <option value="last">Last created</option>
+              <option value="first">Созданную первой</option>
+              <option value="last">Созданную последней</option>
             </select>
           </div>
 
           <div className="toggle-row">
-            <span>Check across different funnels</span>
+            <span>Проверять между разными воронками</span>
             <Toggle
               checked={settings.isDifferentFunnelCheck}
               disabled={saving}
@@ -176,7 +176,7 @@ export default function LeadSettingsTab() {
           </div>
 
           <div className="toggle-row">
-            <span>Add tag instead of merging</span>
+            <span>Добавлять тег вместо объединения</span>
             <Toggle
               checked={settings.isTeg}
               disabled={saving}
@@ -186,14 +186,14 @@ export default function LeadSettingsTab() {
 
           {settings.isTeg && (
             <div className="toggle-row">
-              <span>Tag name</span>
+              <span>Название тега</span>
               <input
                 type="text"
                 className="text-input"
                 value={settings.teg}
                 disabled={saving}
                 onChange={(e) => updateField({ teg: e.target.value })}
-                placeholder="duplicate"
+                placeholder="дубль"
               />
             </div>
           )}
@@ -211,9 +211,9 @@ export default function LeadSettingsTab() {
           disabled={saving || !dirty}
           type="button"
         >
-          {saving ? 'Saving…' : 'Save'}
+          {saving ? 'Сохранение…' : 'Сохранить'}
         </button>
-        {dirty && !saving && <span className="muted">You have unsaved changes</span>}
+        {dirty && !saving && <span className="muted">Есть несохранённые изменения</span>}
       </div>
     </div>
   );

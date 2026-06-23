@@ -1,6 +1,6 @@
 {
   "widget": {
-    "name": "Duplicate Finder/Merger",
+    "name": "Find & Merge Duplicates",
     "short_description": "Find and merge duplicate contacts and leads.",
     "description": "Finds and merges duplicate contacts and leads by phone, email or name. Configure matching rules, merge or tag duplicates, and review the merge history."
   },
@@ -8,6 +8,6 @@
     "api_key": "API key"
   },
   "advanced": {
-    "title": "Duplicate Finder/Merger"
+    "title": "Find & Merge Duplicates"
   }
 }

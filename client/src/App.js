@@ -10,10 +10,10 @@ import { fetchMe } from './api/account';
 import { setApiKey, setAccountContext, API_BASE } from './api/client';
 
 const TABS = [
-  { id: 'find',     label: 'Find Duplicates' },
-  { id: 'contact',  label: 'Contact Settings' },
-  { id: 'lead',     label: 'Lead Settings' },
-  { id: 'history',  label: 'History' },
+  { id: 'find',     label: 'Поиск дублей' },
+  { id: 'contact',  label: 'Настройки контактов' },
+  { id: 'lead',     label: 'Настройки сделок' },
+  { id: 'history',  label: 'История' },
 ];
 
 function detectSubdomain() {
@@ -105,28 +105,28 @@ export default function App() {
 
   const keyBox = newKey && (
     <div className="key-box">
-      <p className="key-box__title">✅ Connected! Your API key:</p>
+      <p className="key-box__title">✅ Подключено! Ваш API-ключ:</p>
       <code className="key-box__value">{newKey}</code>
       <button className="btn btn--primary" onClick={copyKey} type="button">
-        {copied ? 'Copied ✓' : 'Copy'}
+        {copied ? 'Скопировано ✓' : 'Копировать'}
       </button>
       <p className="key-box__hint">
-        Paste it into the widget’s <strong>“API key”</strong> field above and click <strong>Save</strong>.
+        Вставьте его в поле <strong>«API-ключ»</strong> выше и нажмите <strong>«Сохранить»</strong>.
       </p>
     </div>
   );
 
   if (loading) {
-    return <div className="app app--center">Loading…</div>;
+    return <div className="app app--center">Загрузка…</div>;
   }
 
   if (authRequired || !account) {
     return (
       <div className="app app--center">
         <div className="auth-banner">
-          <span>⚠️ This widget must be opened from amoCRM, and its API key must be set in the widget settings.</span>
+          <span>⚠️ Этот виджет нужно открывать из amoCRM, а API-ключ — указать в настройках виджета.</span>
           {subdomain && !newKey && (
-            <button className="btn btn--primary" onClick={handleAuth} type="button">Connect AmoCRM</button>
+            <button className="btn btn--primary" onClick={handleAuth} type="button">Подключить amoCRM</button>
           )}
         </div>
         {keyBox}
@@ -144,7 +144,7 @@ export default function App() {
           <p className="connected-card__title">✅ Подключено{account?.name ? ` — ${account.name}` : ''}</p>
           <p className="connected-card__hint">
             Откройте <strong>«Поиск и объединение дубликатов»</strong> в разделе{' '}
-            <strong>Настройки</strong> (или в левом меню), чтобы искать и объединять дубликаты.
+            <strong>Настройки</strong>, чтобы искать и объединять дубликаты.
           </p>
         </div>
       </div>

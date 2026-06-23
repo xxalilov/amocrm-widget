@@ -5,8 +5,8 @@ import React from 'react';
 export default function ConfirmModal({
   open,
   message,
-  confirmLabel = 'Confirm',
-  cancelLabel = 'Cancel',
+  confirmLabel = 'Подтвердить',
+  cancelLabel = 'Отмена',
   onConfirm,
   onCancel,
   busy = false,
