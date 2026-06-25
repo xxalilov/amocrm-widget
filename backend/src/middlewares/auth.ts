@@ -26,6 +26,17 @@ function extractKey(req: Request): string | null {
     return null;
 }
 
+// The amoCRM subdomain the widget runs under (sent by the SPA as a header). Used
+// as a zero-setup fallback when no widget key is present, so the integration
+// works right after install without the user copying a key.
+function extractSubdomain(req: Request): string | null {
+    const header = req.headers['x-account-subdomain'];
+    if (typeof header === 'string' && header.trim()) {
+        return header.trim().toLowerCase();
+    }
+    return null;
+}
+
 // In dev (APP_ENV=dev) the API works without a key so the frontend can be opened
 // directly. The account is resolved from DEV_SUBDOMAIN, or the first account.
 const IS_DEV = (process.env.APP_ENV || '').toLowerCase() === 'dev';
@@ -50,8 +61,22 @@ export const authenticateWidget = async (req: Request, res: Response, next: Next
                 return next();
             }
             if (!IS_DEV) throw new HttpException(401, 'Invalid API key');
-        } else if (!IS_DEV) {
-            throw new HttpException(401, 'API key required');
+        }
+
+        // Zero-setup fallback: resolve the account by its amoCRM subdomain. Only an
+        // installed account (with stored OAuth tokens) matches, so this works the
+        // moment the widget is added — no key to copy. NOTE: the subdomain is not a
+        // secret; this is a deliberate convenience trade-off, to be hardened later.
+        if (!key) {
+            const subdomain = extractSubdomain(req);
+            if (subdomain) {
+                const account = await models.Account.findOne({ where: { subdomain } });
+                if (account) {
+                    req.account = account;
+                    return next();
+                }
+            }
+            if (!IS_DEV) throw new HttpException(401, 'API key required');
         }
 
         // Dev fallback: no key (or an unknown key) — use the dev account.

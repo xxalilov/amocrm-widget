@@ -1,7 +1,7 @@
 import { DataTypes, Model, Optional } from "sequelize";
 import { ContactSettings } from "../interfaces/contact-settings";
 
-export type ContactSettingsCreationAttributes = Optional<ContactSettings, "id" | "account" | "status" | "fields" | "isFormatNumber" | "checkNumberLength" | "isTeg" | "teg">;
+export type ContactSettingsCreationAttributes = Optional<ContactSettings, "id" | "account" | "status" | "fields" | "isFormatNumber" | "checkNumberLength" | "isTeg" | "teg" | "addMergedTag" | "mergedTag">;
 
 export class ContactSettingsModel extends Model<ContactSettings, ContactSettingsCreationAttributes> implements ContactSettings {
     public id: string;
@@ -12,6 +12,8 @@ export class ContactSettingsModel extends Model<ContactSettings, ContactSettings
     public checkNumberLength: number;
     public isTeg: boolean;
     public teg: string;
+    public addMergedTag: boolean;
+    public mergedTag: string;
 
 }
 
@@ -59,6 +61,16 @@ export default function (sequelize: any): typeof ContactSettingsModel {
             type: DataTypes.STRING,
             allowNull: false,
             defaultValue: '',
+        },
+        addMergedTag: {
+            type: DataTypes.BOOLEAN,
+            allowNull: false,
+            defaultValue: false,
+        },
+        mergedTag: {
+            type: DataTypes.STRING,
+            allowNull: false,
+            defaultValue: 'merged',
         }
     }, {
         tableName: 'contact_settings',

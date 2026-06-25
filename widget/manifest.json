@@ -21,7 +21,7 @@
     "api_key": {
       "name": "settings.api_key",
       "type": "text",
-      "required": true
+      "required": false
     }
   },
   "advanced": {

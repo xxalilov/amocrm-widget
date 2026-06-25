@@ -1,11 +1,11 @@
 import { NextFunction, Request, Response } from "express";
 import { models } from "../utils/database";
-import { HttpException } from '../exceptions/HttpException';
+import { DEFAULT_CONTACT_SETTINGS } from "../utils/settings";
 
 const contactSettingsModel = models.ContactSettings;
 
 // Only these fields may be set by the client; `account`/`id` are server-controlled.
-const CONTACT_SETTINGS_FIELDS = ['status', 'fields', 'isFormatNumber', 'checkNumberLength', 'isTeg', 'teg'] as const;
+const CONTACT_SETTINGS_FIELDS = ['status', 'fields', 'isFormatNumber', 'checkNumberLength', 'isTeg', 'teg', 'addMergedTag', 'mergedTag'] as const;
 
 function pickContactSettings(body: any): Record<string, unknown> {
     const out: Record<string, unknown> = {};
@@ -21,12 +21,11 @@ export const getContactSettings = async (req: Request, res: Response, next: Next
         const contactSettings = await contactSettingsModel.findOne({
             where: { account }
         });
-        if (!contactSettings) {
-            throw new HttpException(404, "Contact settings not found");
-        }
+        // No saved settings yet → return defaults (200) instead of 404, so the
+        // client gets a clean response and shows defaults without a console error.
         res.json({
             success: true,
-            data: contactSettings
+            data: contactSettings || { ...DEFAULT_CONTACT_SETTINGS, account },
         });
     } catch (error) {
         next(error);

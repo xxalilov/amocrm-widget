@@ -12,6 +12,8 @@ const defaultSettings = {
   isDifferentFunnelCheck: false,
   isTeg: false,
   teg: '',
+  addMergedTag: false,
+  mergedTag: 'merged',
 };
 
 function parseIds(raw) {
@@ -194,6 +196,29 @@ export default function LeadSettingsTab() {
                 disabled={saving}
                 onChange={(e) => updateField({ teg: e.target.value })}
                 placeholder="дубль"
+              />
+            </div>
+          )}
+
+          <div className="toggle-row">
+            <span>Добавлять тег после объединения</span>
+            <Toggle
+              checked={settings.addMergedTag}
+              disabled={saving}
+              onChange={(v) => updateField({ addMergedTag: v })}
+            />
+          </div>
+
+          {settings.addMergedTag && (
+            <div className="toggle-row">
+              <span>Название тега</span>
+              <input
+                type="text"
+                className="text-input"
+                value={settings.mergedTag}
+                disabled={saving}
+                onChange={(e) => updateField({ mergedTag: e.target.value })}
+                placeholder="merged"
               />
             </div>
           )}

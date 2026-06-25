@@ -23,9 +23,25 @@ function getName(item, type) {
   return `Сделка #${item.id}`;
 }
 
+// Name only (no id) for the cell's name line — the id is shown on its own line,
+// so a record without a name reads as "(без имени)" instead of looking like an id.
+function displayName(item, type) {
+  if (item.name) return item.name;
+  if (type === 'contact') {
+    return `${item.first_name || ''} ${item.last_name || ''}`.trim() || '(без имени)';
+  }
+  return '(без названия)';
+}
+
 // Prepositional case for «Поиск по …», accusative for «Введите …».
 const FIELD_PREP = { phone: 'телефону', email: 'email', name: 'имени' };
 const FIELD_ACC = { phone: 'телефон', email: 'email', name: 'имя' };
+
+// Human label for the field/grouping the duplicates were matched by (#4).
+const MATCH_LABEL = {
+  phone: 'Телефон', email: 'Email', name: 'Имя',          // contact fields
+  byContact: 'Контакт', byCompany: 'Компания', byName: 'Название', // lead grouping
+};
 
 const SINGLE_KEY = '__single__';
 
@@ -39,6 +55,8 @@ export default function FindDuplicatesTab({ onAuthRequired }) {
   const [groups, setGroups] = useState([]);
   const [selections, setSelections] = useState({});
   const [statusMsg, setStatusMsg] = useState(null);
+  // Which field the duplicates were matched by (shown in the table header).
+  const [matchField, setMatchField] = useState(null);
   // In-widget confirmation dialog: { message, confirmLabel, onConfirm } or null.
   const [confirm, setConfirm] = useState(null);
   // Bumped whenever we start a new scan or reset, so a stale poll loop self-cancels.
@@ -79,6 +97,7 @@ export default function FindDuplicatesTab({ onAuthRequired }) {
     setGroups([]);
     setSelections({});
     setStatusMsg(null);
+    setMatchField(null);
     setMode(null);
   };
 
@@ -115,6 +134,7 @@ export default function FindDuplicatesTab({ onAuthRequired }) {
       const items = data.duplicates || [];
       setDuplicates(items);
       setGroups([]);
+      setMatchField(type === 'contact' ? contactField : 'byName');
       setSelections(items[0] ? { [SINGLE_KEY]: items[0].id } : {});
       if (items.length === 0) setStatusMsg({ kind: 'info', text: 'Дубликаты не найдены' });
     } catch (err) {
@@ -156,6 +176,7 @@ export default function FindDuplicatesTab({ onAuthRequired }) {
       const gs = job.groups || [];
       setGroups(gs);
       setDuplicates([]);
+      setMatchField(job.groupedBy || (type === 'contact' ? contactField : 'byContact'));
       const sel = {};
       for (const g of gs) {
         const key = g.key ?? g.phone ?? g.name;
@@ -340,7 +361,12 @@ export default function FindDuplicatesTab({ onAuthRequired }) {
           <table className="dup-table">
             <thead>
               <tr>
-                <th className="dup-table__title" colSpan={maxCols}>{headerLabel}</th>
+                <th className="dup-table__title" colSpan={maxCols}>
+                  {headerLabel}
+                  {matchField && MATCH_LABEL[matchField] && (
+                    <span className="dup-table__match"> · совпадение по: {MATCH_LABEL[matchField]}</span>
+                  )}
+                </th>
                 <th className="dup-table__action-head">
                   <button
                     className="btn btn--danger"
@@ -367,7 +393,15 @@ export default function FindDuplicatesTab({ onAuthRequired }) {
                           onClick={() => setSelections((p) => ({ ...p, [row.key]: item.id }))}
                           title={`ID: ${item.id}`}
                         >
-                          <div className="dup-table__name">{getName(item, type)}</div>
+                          <div className="dup-table__name">{displayName(item, type)}</div>
+                          <div className="dup-table__id">
+                            {type === 'contact' ? 'Контакт' : 'Сделка'} · ID: {item.id}
+                          </div>
+                          {row.label && (
+                            <div className="dup-table__match-val">
+                              {MATCH_LABEL[matchField] || 'Совпадение'}: {row.label}
+                            </div>
+                          )}
                         </td>
                       );
                     })}

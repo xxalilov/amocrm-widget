@@ -11,6 +11,8 @@ export const DEFAULT_CONTACT_SETTINGS: ContactSettings = {
     checkNumberLength: 9,
     isTeg: false,
     teg: '',
+    addMergedTag: false,
+    mergedTag: 'merged',
 };
 
 export const DEFAULT_LEAD_SETTINGS: LeadSettings = {
@@ -24,6 +26,8 @@ export const DEFAULT_LEAD_SETTINGS: LeadSettings = {
     isDifferentFunnelCheck: false,
     isTeg: false,
     teg: '',
+    addMergedTag: false,
+    mergedTag: 'merged',
 };
 
 export async function loadContactSettings(accountId: string): Promise<ContactSettings> {

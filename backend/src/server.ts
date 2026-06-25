@@ -16,6 +16,7 @@ import contactSettingsRoutes from './routes/contact-settings';
 import leadSettingsRoutes from './routes/lead-settings';
 import pipelinesRoutes from './routes/pipelines';
 import historyRoutes from './routes/history';
+import statsRoutes from './routes/stats';
 
 
 dotenv.config();
@@ -47,6 +48,7 @@ app.use('/contact-settings', authenticateWidget, contactSettingsRoutes);
 app.use('/lead-settings', authenticateWidget, leadSettingsRoutes);
 app.use('/pipelines', authenticateWidget, pipelinesRoutes);
 app.use('/history', authenticateWidget, historyRoutes);
+app.use('/stats', authenticateWidget, statsRoutes);
 
 // Liveness probe for the container/orchestrator (no auth, no DB call).
 app.get('/health', (req, res) => {

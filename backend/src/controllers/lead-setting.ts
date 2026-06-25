@@ -1,7 +1,6 @@
 import { NextFunction, Request, Response } from "express";
 import { models } from "../utils/database";
-
-import { HttpException } from '../exceptions/HttpException';
+import { DEFAULT_LEAD_SETTINGS } from "../utils/settings";
 
 const leadSettingsModel = models.LeadSettings;
 
@@ -9,6 +8,7 @@ const leadSettingsModel = models.LeadSettings;
 const LEAD_SETTINGS_FIELDS = [
     'status', 'findDublicatesBy', 'checkPipelines', 'advantage',
     'remainsStatus', 'isDifferentFunnelCheck', 'isTeg', 'teg',
+    'addMergedTag', 'mergedTag',
 ] as const;
 
 function pickLeadSettings(body: any): Record<string, unknown> {
@@ -25,12 +25,10 @@ export const getLeadSettings = async (req: Request, res: Response, next: NextFun
         const leadSettings = await leadSettingsModel.findOne({
             where: { account }
         });
-        if (!leadSettings) {
-            throw new HttpException(404, "Lead settings not found");
-        }
+        // No saved settings yet → return defaults (200) instead of 404.
         res.json({
             success: true,
-            data: leadSettings
+            data: leadSettings || { ...DEFAULT_LEAD_SETTINGS, account },
         });
     } catch (error) {
         next(error);

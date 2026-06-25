@@ -1,7 +1,7 @@
 import { DataTypes, Model, Optional } from "sequelize";
 import { LeadSettings } from "../interfaces/lead-settings";
 
-export type LeadSettingsCreationAttributes = Optional<LeadSettings, "id" | "account" | "status" | "findDublicatesBy" | "checkPipelines" | "advantage" | "remainsStatus" | "isDifferentFunnelCheck" | "isTeg" | "teg">;
+export type LeadSettingsCreationAttributes = Optional<LeadSettings, "id" | "account" | "status" | "findDublicatesBy" | "checkPipelines" | "advantage" | "remainsStatus" | "isDifferentFunnelCheck" | "isTeg" | "teg" | "addMergedTag" | "mergedTag">;
 
 export class LeadSettingsModel extends Model<LeadSettings, LeadSettingsCreationAttributes> implements LeadSettings {
     public id: string;
@@ -14,6 +14,8 @@ export class LeadSettingsModel extends Model<LeadSettings, LeadSettingsCreationA
     public isDifferentFunnelCheck: boolean;
     public isTeg: boolean;
     public teg: string;
+    public addMergedTag: boolean;
+    public mergedTag: string;
 
 }
 
@@ -71,6 +73,16 @@ export default function (sequelize: any): typeof LeadSettingsModel {
             type: DataTypes.STRING,
             allowNull: false,
             defaultValue: '',
+        },
+        addMergedTag: {
+            type: DataTypes.BOOLEAN,
+            allowNull: false,
+            defaultValue: false,
+        },
+        mergedTag: {
+            type: DataTypes.STRING,
+            allowNull: false,
+            defaultValue: 'merged',
         }
     }, {
         tableName: 'lead_settings',

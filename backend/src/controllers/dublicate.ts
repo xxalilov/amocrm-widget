@@ -7,6 +7,7 @@ import {
   mergeLeads,
   extractContactKey,
   searchLeadsByName,
+  addTag,
 } from '../services/amoApi';
 import { AmoEntity } from '../types';
 import { ContactSettings } from '../interfaces/contact-settings';
@@ -53,10 +54,45 @@ function leadMainComparator(settings: { remainsStatus: string }) {
 
 // Group key for a lead. When isDifferentFunnelCheck is off, the pipeline is part
 // of the key so only leads in the same funnel are treated as duplicates.
-function leadGroupKey(lead: any, settings: { findDublicatesBy: string; isDifferentFunnelCheck: boolean }): string | null {
-    const base = extractLeadGroupKey(lead, settings.findDublicatesBy);
+// `contactCluster` (byContact only) maps a contact id → a shared cluster key so
+// leads belonging to DIFFERENT but DUPLICATE contacts still group together (#2).
+function leadGroupKey(
+    lead: any,
+    settings: { findDublicatesBy: string; isDifferentFunnelCheck: boolean },
+    contactCluster?: Map<number, string>,
+): string | null {
+    let base: string | null;
+    if (settings.findDublicatesBy === 'byContact') {
+        const cid = lead._embedded?.contacts?.[0]?.id ?? lead.main_contact_id;
+        if (!cid) return null;
+        // If this contact is part of a duplicate cluster, key by the cluster so
+        // leads of all those contacts collapse into one group; else key by the id.
+        base = (contactCluster && contactCluster.get(Number(cid))) || `contact:${cid}`;
+    } else {
+        base = extractLeadGroupKey(lead, settings.findDublicatesBy);
+    }
     if (!base) return null;
     return settings.isDifferentFunnelCheck ? base : `${base}|p:${lead.pipeline_id}`;
+}
+
+// Builds contactId → cluster-key for contacts that are duplicates of each other
+// (by the account's contact-matching field). Only ids in a duplicate group appear.
+async function buildContactClusterMap(account: AccountModel, contactSettings: ContactSettings): Promise<Map<number, string>> {
+    const contacts = await getAllContacts(account.subdomain, account.access_token, () => {});
+    const byKey = new Map<string, number[]>();
+    for (const c of contacts) {
+        const k = extractContactKey(c, contactSettings);
+        if (!k) continue;
+        if (!byKey.has(k)) byKey.set(k, []);
+        byKey.get(k)!.push(c.id);
+    }
+    const map = new Map<number, string>();
+    for (const [k, ids] of byKey.entries()) {
+        if (ids.length > 1) {
+            for (const id of ids) map.set(Number(id), `cc:${k}`);
+        }
+    }
+    return map;
 }
 
 // The "Enable …" master toggle (status) chooses configured behavior vs. defaults
@@ -148,9 +184,17 @@ async function scanLeadDuplicates(
     const allItems = await getAllLeads(account.subdomain, account.access_token, onProgress);
     const filtered = allItems.filter((l) => leadInAllowedPipeline(l, settings.checkPipelines));
 
+    // For byContact, treat leads of duplicate contacts as duplicates too (#2):
+    // build the contact-duplicate clusters and group leads by cluster, not raw id.
+    let contactCluster: Map<number, string> | undefined;
+    if (settings.findDublicatesBy === 'byContact') {
+        const contactSettings = effectiveContactSettings(await loadContactSettings(account.id));
+        contactCluster = await buildContactClusterMap(account, contactSettings);
+    }
+
     const groupsMap = new Map<string, AmoEntity[]>();
     for (const lead of filtered) {
-        const groupKey = leadGroupKey(lead, settings);
+        const groupKey = leadGroupKey(lead, settings, contactCluster);
         if (!groupKey) continue;
         if (!groupsMap.has(groupKey)) groupsMap.set(groupKey, []);
         groupsMap.get(groupKey)!.push(lead);
@@ -168,11 +212,26 @@ async function scanLeadDuplicates(
 
 // Runs a scan in the background (memory-heavy → takes a concurrency slot),
 // recording progress and the final result into the job store.
-function runScanJob(jobId: string, scan: (onProgress: (n: number) => void) => Promise<ScanResult>): void {
+function runScanJob(
+    jobId: string,
+    accountId: string,
+    type: 'contact' | 'lead',
+    scan: (onProgress: (n: number) => void) => Promise<ScanResult>,
+): void {
     runJob(jobId, async () => {
-        const onProgress = (scanned: number) => updateJob(jobId, { scanned });
+        let lastScanned = 0;
+        const onProgress = (scanned: number) => { lastScanned = scanned; updateJob(jobId, { scanned }); };
         const { groups, groupedBy } = await scan(onProgress);
         updateJob(jobId, { status: 'done', groups, groupedBy, groupsFound: groups.length });
+        // Persist the last scan's stats for the Statistics view (#3).
+        try {
+            const existing = await models.ScanStat.findOne({ where: { account: accountId, type } });
+            const values = { scanned: lastScanned, groupsFound: groups.length, scannedAt: new Date() };
+            if (existing) await existing.update(values);
+            else await models.ScanStat.create({ account: accountId, type, ...values });
+        } catch (e: any) {
+            console.warn('scan stat save failed:', e.message);
+        }
     }, { useSlot: true });
 }
 
@@ -203,7 +262,7 @@ export const findAllDuplicates = async (req: Request, res: Response, next: NextF
         }
 
         const job = createJob(accountId, 'scan', dedupKey);
-        runScanJob(job.id, scan);
+        runScanJob(job.id, accountId, type, scan);
         res.status(202).json({ jobId: job.id });
     } catch (err: any) {
         console.error('Find all duplicates error:', err.message);
@@ -337,6 +396,16 @@ export const mergeLog = async (req: Request, res: Response, next: NextFunction) 
         const snapshot: { id: number; name: string }[] = Array.isArray(dupSnapshot)
             ? dupSnapshot
             : (duplicateIds || []).map((id: number) => ({ id, name: '' }));
+
+        // Optionally tag the surviving record after a real (native) merge.
+        const settings = type === 'contact'
+            ? await loadContactSettings(account.id)
+            : await loadLeadSettings(account.id);
+        if (settings.addMergedTag) {
+            const entityType = type === 'contact' ? 'contacts' : 'leads';
+            await addTag(account.subdomain, entityType, [Number(mainId)], settings.mergedTag || 'merged', account.access_token);
+        }
+
         await recordHistory({
             accountId: account.id,
             type,

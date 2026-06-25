@@ -5,7 +5,7 @@
     "description": "Finds and merges duplicate contacts and leads by phone, email or name. Configure matching rules, merge or tag duplicates, and review the merge history."
   },
   "settings": {
-    "api_key": "API key"
+    "api_key": "API key (optional)"
   },
   "advanced": {
     "title": "Find & Merge Duplicates"

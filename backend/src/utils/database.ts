@@ -5,6 +5,7 @@ import  AccountModel  from "../models/account";
 import  ContactSettingsModel  from "../models/contact-settings";
 import  LeadSettingsModel  from "../models/lead-settings";
 import  MergeHistoryModel  from "../models/merge-history";
+import  ScanStatModel  from "../models/scan-stat";
 
 dotenv.config();
 
@@ -35,6 +36,16 @@ const DB = async function() {
     await sequelize.query(
         'ALTER TABLE accounts ADD COLUMN IF NOT EXISTS widget_key VARCHAR UNIQUE'
     ).catch((err) => console.warn('widget_key column check:', err.message));
+    // "merged" tag after a real merge (added later — see contact/lead settings).
+    // Columns are camelCase, so they must be quoted.
+    for (const table of ['contact_settings', 'lead_settings']) {
+        await sequelize.query(
+            `ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS "addMergedTag" BOOLEAN NOT NULL DEFAULT false`
+        ).catch((err) => console.warn(`${table}.addMergedTag column check:`, err.message));
+        await sequelize.query(
+            `ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS "mergedTag" VARCHAR NOT NULL DEFAULT 'merged'`
+        ).catch((err) => console.warn(`${table}.mergedTag column check:`, err.message));
+    }
     console.log('Database connected successfully');
 }
 
@@ -42,17 +53,21 @@ const Account = AccountModel(sequelize);
 const ContactSettings = ContactSettingsModel(sequelize);
 const LeadSettings = LeadSettingsModel(sequelize);
 const MergeHistory = MergeHistoryModel(sequelize);
+const ScanStat = ScanStatModel(sequelize);
 Account.hasOne(ContactSettings, { foreignKey: 'account', as: 'contactSettingsData' });
 Account.hasOne(LeadSettings, { foreignKey: 'account', as: 'leadSettingsData' });
 Account.hasMany(MergeHistory, { foreignKey: 'account', as: 'mergeHistory' });
+Account.hasMany(ScanStat, { foreignKey: 'account', as: 'scanStats' });
 ContactSettings.belongsTo(Account, { foreignKey: 'account', as: 'accountData' });
 LeadSettings.belongsTo(Account, { foreignKey: 'account', as: 'accountData' });
 MergeHistory.belongsTo(Account, { foreignKey: 'account', as: 'accountData' });
+ScanStat.belongsTo(Account, { foreignKey: 'account', as: 'accountData' });
 export const models = {
     Account,
     ContactSettings,
     LeadSettings,
     MergeHistory,
+    ScanStat,
 }
 
 export default DB;

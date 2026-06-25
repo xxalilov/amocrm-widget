@@ -49,7 +49,12 @@ async function request(path, options = {}) {
     ...options,
     headers: {
       'Content-Type': 'application/json',
+      // Old, secure path: a manually-entered widget key (Bearer). Still works.
       ...(key ? { Authorization: `Bearer ${key}` } : {}),
+      // Zero-setup path: identify the account by its amoCRM subdomain (passed by
+      // the widget as ?account=). The backend uses this only when no valid key is
+      // present, so installing the widget works without copying a key.
+      ...(currentSubdomain ? { 'X-Account-Subdomain': currentSubdomain } : {}),
       ...(options.headers || {}),
     },
   });

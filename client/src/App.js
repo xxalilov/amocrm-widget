@@ -6,6 +6,7 @@ import FindDuplicatesTab from './tabs/FindDuplicatesTab';
 import ContactSettingsTab from './tabs/ContactSettingsTab';
 import LeadSettingsTab from './tabs/LeadSettingsTab';
 import HistoryTab from './tabs/HistoryTab';
+import StatsTab from './tabs/StatsTab';
 import { fetchMe } from './api/account';
 import { setApiKey, setAccountContext, API_BASE } from './api/client';
 
@@ -14,6 +15,7 @@ const TABS = [
   { id: 'contact',  label: 'Настройки контактов' },
   { id: 'lead',     label: 'Настройки сделок' },
   { id: 'history',  label: 'История' },
+  { id: 'stats',    label: 'Статистика' },
 ];
 
 function detectSubdomain() {
@@ -162,6 +164,7 @@ export default function App() {
         {activeTab === 'contact' && <ContactSettingsTab />}
         {activeTab === 'lead' && <LeadSettingsTab />}
         {activeTab === 'history' && <HistoryTab />}
+        {activeTab === 'stats' && <StatsTab />}
       </main>
     </div>
   );
