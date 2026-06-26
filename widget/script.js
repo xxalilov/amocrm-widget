@@ -2,6 +2,7 @@ define(['jquery'], function ($) {
   'use strict';
 
   var APP_URL = 'https://deduplicate.upsoft.app';
+  var BACKEND_URL = 'https://api.deduplicate.upsoft.app';
   var FRAME_CLASS = 'dedup-frame';
   var WRAP_CLASS = 'dedup-wrap';
   // ─────────────────────────────────────────────────────────────
@@ -237,22 +238,40 @@ define(['jquery'], function ($) {
 
   var CustomWidget = function () {
     var self = this;
+    // The account's API key. We fill it without any user action: prefer a manually
+    // entered settings value (backward compatible), otherwise fetch it once from the
+    // backend by subdomain (the backend only returns it to this account's own amo
+    // page — see /auth/widget-key). Until it arrives the SPA still authorizes via
+    // the X-Account-Subdomain header, so a slow/failed fetch never blocks the app.
+    var cachedKey = '';
+    var keyResolved = false;
+
+    function subdomain() {
+      try { return self.system().subdomain || ''; } catch (e) { return ''; }
+    }
+
+    function settingsKey() {
+      try { return self.get_settings().api_key || ''; } catch (e) { return ''; }
+    }
+
+    // Resolves the API key (once) and calls cb(). Never blocks: on any error it
+    // proceeds with an empty key and the SPA falls back to subdomain auth.
+    function ensureKey(cb) {
+      if (keyResolved) { cb(); return; }
+      var manual = settingsKey();
+      if (manual) { cachedKey = manual; keyResolved = true; cb(); return; }
+      var sub = subdomain();
+      if (!sub) { keyResolved = true; cb(); return; }
+      $.ajax({ url: BACKEND_URL + '/auth/widget-key', method: 'GET', data: { subdomain: sub }, dataType: 'json' })
+        .done(function (resp) { if (resp && resp.key) cachedKey = resp.key; })
+        .always(function () { keyResolved = true; cb(); });
+    }
 
     function appUrl(full) {
-      var subdomain = '';
-      try {
-        subdomain = self.system().subdomain || '';
-      } catch (e) {}
-      // The API key is configured in the widget settings (field "API key") and
-      // passed to the iframe, which sends it as a Bearer token on every request.
-      var apiKey = '';
-      try {
-        apiKey = self.get_settings().api_key || '';
-      } catch (e) {}
       // view=full → the complete app (advanced settings page / left-menu page);
       // view=mini → compact key-management card (the cramped marketplace popup).
-      return APP_URL + '/?account=' + encodeURIComponent(subdomain) +
-        '&key=' + encodeURIComponent(apiKey) +
+      return APP_URL + '/?account=' + encodeURIComponent(subdomain()) +
+        '&key=' + encodeURIComponent(cachedKey) +
         '&view=' + (full ? 'full' : 'mini');
     }
 
@@ -319,16 +338,38 @@ define(['jquery'], function ($) {
 
     // On a normal page load the work-area is created slightly after render()
     // fires, so poll for it briefly. The dedup guard in mount() keeps this from
-    // ever injecting a second iframe.
+    // ever injecting a second iframe. We resolve the API key first so the iframe
+    // is created once, already carrying the key (no reload needed).
     function mountWithRetry(attempts) {
-      if (mount()) return;
+      ensureKey(function () {
+        if (mount()) return;
+        if (attempts <= 0) return;
+        setTimeout(function () { mountWithRetry(attempts - 1); }, 300);
+      });
+    }
+
+    // amoCRM mandates a settings field, which it renders as a text input. We have
+    // no real setting (the key is fetched automatically), so hide that native
+    // input row — only our iframe should show in the settings popup. Retries a few
+    // times since the form may still be rendering. (Same approach as other widgets.)
+    function hideNativeSettingsField(attempts) {
+      var $input = $('input[name="info"]');
+      if ($input.length) {
+        $input.hide();
+        // Hide the whole field row too — amoCRM's wrapper class varies by build,
+        // so try the known ones and fall back to the input's parent.
+        var $row = $input.closest('.widget_settings_block__item_field, .widget_settings_block__item, .control, .input__wrapper, .field');
+        if ($row.length) $row.hide(); else $input.parent().hide();
+        return;
+      }
       if (attempts <= 0) return;
-      setTimeout(function () { mountWithRetry(attempts - 1); }, 300);
+      setTimeout(function () { hideNativeSettingsField(attempts - 1); }, 200);
     }
 
     this.callbacks = {
       // Widget settings popup (in amoCRM settings → integrations).
       settings: function () {
+        hideNativeSettingsField(15);
         return true;
       },
 

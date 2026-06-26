@@ -11,6 +11,34 @@ function generateWidgetKey(): string {
   return randomBytes(24).toString('hex');
 }
 
+// amoCRM / Kommo account origins, e.g. https://mycompany.amocrm.ru
+export const AMO_ORIGIN_RE = /^https:\/\/([a-z0-9-]+)\.(amocrm\.(ru|com)|kommo\.com)$/i;
+
+// Hands the widget's script.js its account's API key so it can authorize the
+// SPA without the user copying anything. Safe because the caller must be inside
+// that account's own amoCRM page: the request Origin must be <subdomain>.amocrm.ru
+// AND match the requested subdomain. (CORS for this route is opened to amo origins
+// in routes/auth.ts.) Only an installed account (with a stored key) resolves.
+export const getWidgetKey = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const subdomain = String(req.query.subdomain || '').toLowerCase().trim();
+    if (!subdomain) throw new HttpException(400, 'subdomain required');
+
+    const origin = String(req.headers.origin || '');
+    const m = origin.match(AMO_ORIGIN_RE);
+    if (!m || m[1].toLowerCase() !== subdomain) {
+      throw new HttpException(403, 'origin mismatch');
+    }
+
+    const account = await accountModel.findOne({ where: { subdomain } });
+    if (!account || !account.widget_key) throw new HttpException(404, 'not installed');
+
+    res.json({ key: account.widget_key });
+  } catch (err) {
+    next(err);
+  }
+}
+
 export const authInstall = async (req: Request, res: Response, next: NextFunction) => {
   const { subdomain } = req.query;
   if (!subdomain || typeof subdomain !== 'string') {

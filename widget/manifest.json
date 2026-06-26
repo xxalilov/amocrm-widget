@@ -4,7 +4,7 @@
     "description": "widget.description",
     "short_description": "widget.short_description",
     "category": "tools",
-    "version": "1.3.0",
+    "version": "1.3.1",
     "interface_version": 2,
     "init_once": false,
     "locale": [
@@ -18,8 +18,8 @@
     "advanced_settings"
   ],
   "settings": {
-    "api_key": {
-      "name": "settings.api_key",
+    "info": {
+      "name": "settings.title",
       "type": "text",
       "required": false
     }
