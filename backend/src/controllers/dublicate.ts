@@ -3,15 +3,20 @@ import {
   searchContacts,
   getAllContacts,
   getAllLeads,
+  getAllCompanies,
+  searchCompanies,
   mergeContacts,
   mergeLeads,
+  mergeCompanies,
   extractContactKey,
+  extractCompanyKey,
   searchLeadsByName,
   addTag,
 } from '../services/amoApi';
 import { AmoEntity } from '../types';
 import { ContactSettings } from '../interfaces/contact-settings';
 import { LeadSettings } from '../interfaces/lead-settings';
+import { CompanySettings } from '../interfaces/company-settings';
 
 import { models } from "../utils/database";
 import { AccountModel } from "../models/account";
@@ -19,6 +24,7 @@ import { HttpException } from '../exceptions/HttpException';
 import {
     loadContactSettings,
     loadLeadSettings,
+    loadCompanySettings,
 } from '../utils/settings';
 import { getValidAccount } from '../services/auth';
 import { createJob, getJob, updateJob, runJob, activeJobFor, ScanGroup } from '../utils/jobStore';
@@ -114,6 +120,10 @@ function effectiveLeadSettings(s: LeadSettings): LeadSettings {
     return s;
 }
 
+function effectiveCompanySettings(s: CompanySettings): CompanySettings {
+    return s;
+}
+
 export const search = async (req: Request, res: Response, next: NextFunction) => {
     try {
         const { type, phone } = req.body;
@@ -123,8 +133,14 @@ export const search = async (req: Request, res: Response, next: NextFunction) =>
         const subdomain = account.subdomain;
         const accessToken = account.access_token;
 
-        // Contact-only: amoCRM stores phone/email on contacts, not leads, so a
-        // single-term lead search uses the by-name endpoint instead.
+        // Contacts and companies carry phone/email/name and use the query search.
+        // Leads have no such fields, so a single-term lead search uses by-name.
+        if (type === 'company') {
+            const settings = effectiveCompanySettings(await loadCompanySettings(account.id));
+            const items = await searchCompanies(subdomain, phone, accessToken, settings);
+            items.sort((a, b) => b.updated_at - a.updated_at);
+            return res.json({ duplicates: items });
+        }
         if (type !== 'contact') {
             throw new HttpException(400, 'Invalid type');
         }
@@ -162,6 +178,31 @@ async function scanContactDuplicates(
         if (items.length > 1) {
             items.sort((a, b) => b.updated_at - a.updated_at);
             groups.push({ key: k, phone: k, items });
+        }
+    }
+    return { groups, groupedBy };
+}
+
+async function scanCompanyDuplicates(
+    account: AccountModel,
+    settings: CompanySettings,
+    onProgress: (n: number) => void,
+): Promise<ScanResult> {
+    const allItems = await getAllCompanies(account.subdomain, account.access_token, onProgress);
+    const groupedBy = (settings.fields as string) || 'name';
+
+    const groupsMap = new Map<string, AmoEntity[]>();
+    for (const item of allItems) {
+        const k = extractCompanyKey(item, settings);
+        if (!k) continue;
+        if (!groupsMap.has(k)) groupsMap.set(k, []);
+        groupsMap.get(k)!.push(item);
+    }
+    const groups: ScanGroup[] = [];
+    for (const [k, items] of groupsMap.entries()) {
+        if (items.length > 1) {
+            items.sort((a, b) => b.updated_at - a.updated_at);
+            groups.push({ key: k, name: items[0].name || k, items });
         }
     }
     return { groups, groupedBy };
@@ -222,7 +263,7 @@ async function scanLeadDuplicates(
 function runScanJob(
     jobId: string,
     accountId: string,
-    type: 'contact' | 'lead',
+    type: 'contact' | 'lead' | 'company',
     scan: (onProgress: (n: number) => void) => Promise<ScanResult>,
 ): void {
     runJob(jobId, async () => {
@@ -245,7 +286,7 @@ function runScanJob(
 export const findAllDuplicates = async (req: Request, res: Response, next: NextFunction) => {
     try {
         const { type } = req.body;
-        if (type !== 'contact' && type !== 'lead') throw new HttpException(400, 'Invalid type');
+        if (type !== 'contact' && type !== 'lead' && type !== 'company') throw new HttpException(400, 'Invalid type');
 
         const subdomain = req.account!.subdomain;
         const accountId = req.account!.id;
@@ -263,6 +304,9 @@ export const findAllDuplicates = async (req: Request, res: Response, next: NextF
         if (type === 'contact') {
             const settings = effectiveContactSettings(await loadContactSettings(account.id));
             scan = (onProgress) => scanContactDuplicates(account, settings, onProgress);
+        } else if (type === 'company') {
+            const settings = effectiveCompanySettings(await loadCompanySettings(account.id));
+            scan = (onProgress) => scanCompanyDuplicates(account, settings, onProgress);
         } else {
             const settings = effectiveLeadSettings(await loadLeadSettings(account.id));
             scan = (onProgress) => scanLeadDuplicates(account, settings, onProgress);
@@ -382,6 +426,21 @@ export const merge = async (req: Request, res: Response, next: NextFunction) => 
             return res.json({ success: true, message: settings.isTeg ? 'Tag added' : 'Leads merged' });
         }
 
+        if (type === 'company') {
+            const settings = effectiveCompanySettings(await loadCompanySettings(account.id));
+            await mergeCompanies(subdomain, mainId, duplicateIds, accessToken, settings);
+            await recordHistory({
+                accountId: account.id,
+                type,
+                action: settings.isTeg ? 'tag' : 'merge',
+                mainId,
+                mainName,
+                duplicates: snapshot,
+                tag: settings.isTeg ? settings.teg : '',
+            });
+            return res.json({ success: true, message: settings.isTeg ? 'Tag added' : 'Companies merged' });
+        }
+
         throw new HttpException(400, 'Invalid type');
     } catch (err: any) {
         console.error('Merge error:', err.message);
@@ -396,7 +455,7 @@ export const merge = async (req: Request, res: Response, next: NextFunction) => 
 export const mergeLog = async (req: Request, res: Response, next: NextFunction) => {
     try {
         const { type, mainId, duplicateIds, mainName, duplicates: dupSnapshot } = req.body;
-        if ((type !== 'contact' && type !== 'lead') || !mainId) {
+        if ((type !== 'contact' && type !== 'lead' && type !== 'company') || !mainId) {
             throw new HttpException(400, 'Missing parameters');
         }
         const account = await requireAccount(req.account!.subdomain);
@@ -407,9 +466,11 @@ export const mergeLog = async (req: Request, res: Response, next: NextFunction) 
         // Optionally tag the surviving record after a real (native) merge.
         const settings = type === 'contact'
             ? await loadContactSettings(account.id)
-            : await loadLeadSettings(account.id);
+            : type === 'company'
+                ? await loadCompanySettings(account.id)
+                : await loadLeadSettings(account.id);
         if (settings.addMergedTag) {
-            const entityType = type === 'contact' ? 'contacts' : 'leads';
+            const entityType = type === 'contact' ? 'contacts' : type === 'company' ? 'companies' : 'leads';
             await addTag(account.subdomain, entityType, [Number(mainId)], settings.mergedTag || 'merged', account.access_token);
         }
 
@@ -442,8 +503,8 @@ function runMergeJob(
     jobId: string,
     subdomain: string,
     accountId: string,
-    type: 'contact' | 'lead',
-    settings: ContactSettings | LeadSettings,
+    type: 'contact' | 'lead' | 'company',
+    settings: ContactSettings | LeadSettings | CompanySettings,
     groups: MergeGroupInput[],
 ): void {
     const isTeg = (settings as any).isTeg === true;
@@ -462,6 +523,8 @@ function runMergeJob(
                     const account = await getValidAccount(subdomain); // fresh token each group
                     if (type === 'contact') {
                         await mergeContacts(subdomain, mainId, duplicateIds, account.access_token, settings as ContactSettings);
+                    } else if (type === 'company') {
+                        await mergeCompanies(subdomain, mainId, duplicateIds, account.access_token, settings as CompanySettings);
                     } else {
                         await mergeLeads(subdomain, mainId, duplicateIds, account.access_token, settings as LeadSettings);
                     }
@@ -489,7 +552,7 @@ function runMergeJob(
 export const mergeAll = async (req: Request, res: Response, next: NextFunction) => {
     try {
         const { type, groups } = req.body;
-        if (type !== 'contact' && type !== 'lead') throw new HttpException(400, 'Invalid type');
+        if (type !== 'contact' && type !== 'lead' && type !== 'company') throw new HttpException(400, 'Invalid type');
         if (!Array.isArray(groups) || groups.length === 0) throw new HttpException(400, 'groups required');
 
         const subdomain = req.account!.subdomain;
@@ -504,7 +567,9 @@ export const mergeAll = async (req: Request, res: Response, next: NextFunction) 
         const account = await requireAccount(subdomain);
         const settings = type === 'contact'
             ? effectiveContactSettings(await loadContactSettings(account.id))
-            : effectiveLeadSettings(await loadLeadSettings(account.id));
+            : type === 'company'
+                ? effectiveCompanySettings(await loadCompanySettings(account.id))
+                : effectiveLeadSettings(await loadLeadSettings(account.id));
 
         const job = createJob(accountId, 'merge', dedupKey);
         updateJob(job.id, { total: groups.length });

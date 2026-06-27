@@ -211,7 +211,7 @@ define(['jquery'], function ($) {
       function reply(ok, error) {
         try { ev.source.postMessage({ source: 'dedup-host', reqId: msg.reqId, ok: ok, error: error || null }, APP_URL); } catch (e) {}
       }
-      var entity = msg.type === 'lead' ? 'leads' : 'contacts';
+      var entity = msg.type === 'lead' ? 'leads' : msg.type === 'company' ? 'companies' : 'contacts';
       var mainId = String(msg.mainId || '');
       var ids = (msg.ids || []).map(String);
       if (!mainId || ids.length < 2) { reply(false, 'bad request'); return; }
@@ -415,7 +415,7 @@ define(['jquery'], function ($) {
 
       // Merge every group of one type, one at a time, via the native merge.
       function mergeGroups(type, groups) {
-        var entity = type === 'lead' ? 'leads' : 'contacts';
+        var entity = type === 'lead' ? 'leads' : type === 'company' ? 'companies' : 'contacts';
         var merged = 0, failed = 0, i = 0;
         function step() {
           if (i >= groups.length) return Promise.resolve({ merged: merged, failed: failed });
@@ -482,11 +482,12 @@ define(['jquery'], function ($) {
       function tick() {
         if (busy) return;
         busy = true;
-        // Contacts first (lead grouping can depend on contact duplicates), then leads.
-        // Start from Promise.resolve() so even a synchronous throw inside runOne is
-        // caught here and never leaves `busy` stuck (which would freeze all ticks).
+        // Contacts first (lead grouping can depend on contact duplicates), then
+        // companies, then leads. Start from Promise.resolve() so even a synchronous
+        // throw inside runOne is caught here and never leaves `busy` stuck.
         Promise.resolve()
           .then(function () { return runOne('contact'); })
+          .then(function () { return runOne('company'); })
           .then(function () { return runOne('lead'); })
           .then(function () { busy = false; }, function () { busy = false; });
       }

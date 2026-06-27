@@ -16,6 +16,12 @@ export const startFindAllContactDuplicates = () =>
 export const startFindAllLeadDuplicates = () =>
   api.post('/api/find-all-duplicates', { type: 'lead' });
 
+export const startFindAllCompanyDuplicates = () =>
+  api.post('/api/find-all-duplicates', { type: 'company' });
+
+export const searchCompaniesByField = (term) =>
+  api.post('/api/search', { type: 'company', phone: term });
+
 export const getJobStatus = (jobId) => api.get(`/api/jobs/${jobId}`);
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

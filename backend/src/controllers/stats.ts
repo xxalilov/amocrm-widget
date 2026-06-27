@@ -28,6 +28,7 @@ export const getStats = async (req: Request, res: Response, next: NextFunction) 
         const agg: Record<string, { operations: number; recordsMerged: number }> = {
             contact: { operations: 0, recordsMerged: 0 },
             lead: { operations: 0, recordsMerged: 0 },
+            company: { operations: 0, recordsMerged: 0 },
         };
         let lastMergeAt: Date | null = null;
         for (const m of merges) {
@@ -38,7 +39,7 @@ export const getStats = async (req: Request, res: Response, next: NextFunction) 
             if (!lastMergeAt || new Date(row.createdAt) > lastMergeAt) lastMergeAt = new Date(row.createdAt);
         }
 
-        const build = (type: 'contact' | 'lead') => ({
+        const build = (type: 'contact' | 'lead' | 'company') => ({
             scanned: scanByType[type]?.scanned ?? 0,
             groupsFound: scanByType[type]?.groupsFound ?? 0,
             scannedAt: scanByType[type]?.scannedAt ?? null,
@@ -51,6 +52,7 @@ export const getStats = async (req: Request, res: Response, next: NextFunction) 
             data: {
                 contact: build('contact'),
                 lead: build('lead'),
+                company: build('company'),
                 lastMergeAt,
             },
         });

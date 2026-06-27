@@ -11,3 +11,9 @@ export const fetchLeadSettings = () =>
 
 export const updateLeadSettings = (patch) =>
   api.put('/lead-settings', patch).then((r) => r.data);
+
+export const fetchCompanySettings = () =>
+  api.get('/company-settings').then((r) => r.data);
+
+export const updateCompanySettings = (patch) =>
+  api.put('/company-settings', patch).then((r) => r.data);

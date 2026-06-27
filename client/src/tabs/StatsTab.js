@@ -63,6 +63,7 @@ export default function StatsTab() {
       <div className="stats-grid">
         <StatCard title="Контакты" data={stats.contact} />
         <StatCard title="Сделки" data={stats.lead} />
+        {stats.company && <StatCard title="Компании" data={stats.company} />}
       </div>
       <div className="muted stats-last-merge">
         Последнее объединение: {formatDate(stats.lastMergeAt)}

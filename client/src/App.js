@@ -5,6 +5,7 @@ import Tabs from './components/Tabs';
 import FindDuplicatesTab from './tabs/FindDuplicatesTab';
 import ContactSettingsTab from './tabs/ContactSettingsTab';
 import LeadSettingsTab from './tabs/LeadSettingsTab';
+import CompanySettingsTab from './tabs/CompanySettingsTab';
 import HistoryTab from './tabs/HistoryTab';
 import StatsTab from './tabs/StatsTab';
 import { fetchMe } from './api/account';
@@ -14,6 +15,7 @@ const TABS = [
   { id: 'find',     label: 'Поиск дублей' },
   { id: 'contact',  label: 'Настройки контактов' },
   { id: 'lead',     label: 'Настройки сделок' },
+  { id: 'company',  label: 'Настройки компаний' },
   { id: 'history',  label: 'История' },
   { id: 'stats',    label: 'Статистика' },
 ];
@@ -163,6 +165,7 @@ export default function App() {
         )}
         {activeTab === 'contact' && <ContactSettingsTab />}
         {activeTab === 'lead' && <LeadSettingsTab />}
+        {activeTab === 'company' && <CompanySettingsTab />}
         {activeTab === 'history' && <HistoryTab />}
         {activeTab === 'stats' && <StatsTab />}
       </main>

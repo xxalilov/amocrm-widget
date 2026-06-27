@@ -32,7 +32,7 @@ export default function (sequelize: any): typeof AutoStateModel {
             allowNull: false,
         },
         type: {
-            type: DataTypes.ENUM('contact', 'lead'),
+            type: DataTypes.ENUM('contact', 'lead', 'company'),
             allowNull: false,
         },
         nextDueAt: {

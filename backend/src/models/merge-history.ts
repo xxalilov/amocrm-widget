@@ -28,7 +28,7 @@ export default function (sequelize: Sequelize): typeof MergeHistoryModel {
             allowNull: false,
         },
         type: {
-            type: DataTypes.ENUM('contact', 'lead'),
+            type: DataTypes.ENUM('contact', 'lead', 'company'),
             allowNull: false,
         },
         action: {

@@ -6,6 +6,7 @@ export interface AmoEntity {
   updated_at: number;
   created_at?: number;
   pipeline_id?: number;
+  status_id?: number;
   custom_fields_values?: Array<{
     field_id?: number;
     field_code?: string;
@@ -18,5 +19,6 @@ export interface SearchResult {
   _embedded?: {
     contacts?: AmoEntity[];
     leads?: AmoEntity[];
+    companies?: AmoEntity[];
   };
 }

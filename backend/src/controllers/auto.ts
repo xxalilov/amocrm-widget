@@ -2,7 +2,7 @@ import { NextFunction, Request, Response } from "express";
 import { randomUUID } from "crypto";
 import { Op } from "sequelize";
 import { models } from "../utils/database";
-import { loadContactSettings, loadLeadSettings } from "../utils/settings";
+import { loadContactSettings, loadLeadSettings, loadCompanySettings } from "../utils/settings";
 import { HttpException } from "../exceptions/HttpException";
 
 // How long a run may hold the lease without a heartbeat before another tab may
@@ -11,19 +11,23 @@ import { HttpException } from "../exceptions/HttpException";
 // scan+merge can take many minutes, far longer than this base TTL).
 const LEASE_TTL_MS = 3 * 60_000;
 
-function isAutoType(t: any): t is 'contact' | 'lead' {
-    return t === 'contact' || t === 'lead';
+type AutoType = 'contact' | 'lead' | 'company';
+
+function isAutoType(t: any): t is AutoType {
+    return t === 'contact' || t === 'lead' || t === 'company';
 }
 
-async function loadAutoSettings(accountId: string, type: 'contact' | 'lead') {
+async function loadAutoSettings(accountId: string, type: AutoType) {
     const s = type === 'contact'
         ? await loadContactSettings(accountId)
-        : await loadLeadSettings(accountId);
+        : type === 'company'
+            ? await loadCompanySettings(accountId)
+            : await loadLeadSettings(accountId);
     const interval = Math.max(1, Number((s as any).autoInterval) || 5);
     return { autoMerge: (s as any).autoMerge === true, interval };
 }
 
-async function getOrCreateState(accountId: string, type: 'contact' | 'lead') {
+async function getOrCreateState(accountId: string, type: AutoType) {
     const [row] = await models.AutoState.findOrCreate({
         where: { account: accountId, type },
         defaults: { account: accountId, type },
@@ -126,7 +130,7 @@ export const autoStatus = async (req: Request, res: Response, next: NextFunction
     try {
         const accountId = req.account!.id;
         const out: Record<string, unknown> = {};
-        for (const type of ['contact', 'lead'] as const) {
+        for (const type of ['contact', 'lead', 'company'] as const) {
             const { autoMerge, interval } = await loadAutoSettings(accountId, type);
             const state = await models.AutoState.findOne({ where: { account: accountId, type } });
             out[type] = {

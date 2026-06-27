@@ -4,6 +4,7 @@ import https from 'https';
 import { AmoEntity, SearchResult } from '../types';
 import { ContactSettings } from '../interfaces/contact-settings';
 import { LeadSettings } from '../interfaces/lead-settings';
+import { CompanySettings } from '../interfaces/company-settings';
 import { RateLimiter } from '../utils/rateLimiter';
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -103,6 +104,24 @@ export function extractContactKey(entity: AmoEntity, settings: ContactSettings):
   return phone;
 }
 
+// Comparison key for a company. Companies carry the same PHONE/EMAIL custom
+// fields and a `name`, so the logic mirrors extractContactKey.
+export function extractCompanyKey(entity: AmoEntity, settings: CompanySettings): string | null {
+  if (settings.fields === 'name') {
+    return entity.name?.toLowerCase().trim() || null;
+  }
+  if (settings.fields === 'email') {
+    return extractEmail(entity);
+  }
+  // phone
+  let phone = extractPhone(entity);
+  if (!phone) return null;
+  if (settings.isFormatNumber && settings.checkNumberLength > 0) {
+    phone = phone.slice(-settings.checkNumberLength);
+  }
+  return phone;
+}
+
 // Internal marker tag put on a duplicate after it has been merged away.
 // amoCRM v4 has no delete API, so we tag + filter instead of deleting.
 export const MERGED_TAG = 'merged_duplicate';
@@ -114,7 +133,7 @@ export function hasTag(entity: any, tagName: string): boolean {
 // Append a tag to entities using amoCRM's `tags_to_add` (does not drop existing tags).
 export async function addTag(
   subdomain: string,
-  entityType: 'contacts' | 'leads',
+  entityType: 'contacts' | 'leads' | 'companies',
   ids: number[],
   tagName: string,
   accessToken: string,
@@ -165,7 +184,7 @@ export async function searchContacts(
 async function fetchAllPages(
   subdomain: string,
   accessToken: string,
-  path: 'contacts' | 'leads',
+  path: 'contacts' | 'leads' | 'companies',
   onProgress?: (scanned: number) => void,
 ): Promise<AmoEntity[]> {
   const items: AmoEntity[] = [];
@@ -207,6 +226,42 @@ export async function getAllContacts(
 ): Promise<AmoEntity[]> {
   const contacts = await fetchAllPages(subdomain, accessToken, 'contacts', onProgress);
   return contacts.filter((c) => !hasTag(c, MERGED_TAG));
+}
+
+export async function getAllCompanies(
+  subdomain: string,
+  accessToken: string,
+  onProgress?: (scanned: number) => void,
+): Promise<AmoEntity[]> {
+  const companies = await fetchAllPages(subdomain, accessToken, 'companies', onProgress);
+  return companies.filter((c) => !hasTag(c, MERGED_TAG));
+}
+
+// Settings-aware company search (mirror of searchContacts).
+export async function searchCompanies(
+  subdomain: string,
+  term: string,
+  accessToken: string,
+  settings: CompanySettings,
+): Promise<AmoEntity[]> {
+  let key: string;
+  if (settings.fields === 'phone') {
+    key = term.replace(/\D/g, '');
+    if (settings.isFormatNumber && settings.checkNumberLength > 0) {
+      key = key.slice(-settings.checkNumberLength);
+    }
+  } else {
+    key = term.toLowerCase().trim();
+  }
+
+  const result = await amoRequest<SearchResult>(
+    subdomain,
+    'get',
+    `/api/v4/companies?query=${encodeURIComponent(term)}`,
+    accessToken,
+  );
+  const companies = result._embedded?.companies || [];
+  return companies.filter((c) => !hasTag(c, MERGED_TAG) && extractCompanyKey(c, settings) === key);
 }
 
 
@@ -378,6 +433,70 @@ export async function mergeContacts(
       throw new Error(
         `Merge failed for contact ${dupId}: ${err.message}`
       );
+    }
+  }
+}
+
+// API-based company merge — the FALLBACK path (tag mode, or when the SPA isn't
+// embedded so the native штатный merge isn't available). The primary path is the
+// browser native merge in script.js. Here we relink the duplicate's leads/contacts
+// to the surviving company, copy over any missing custom fields, and tag the
+// duplicate as merged (amoCRM v4 has no delete API).
+export async function mergeCompanies(
+  subdomain: string,
+  mainId: number,
+  duplicateIds: number[],
+  accessToken: string,
+  settings?: CompanySettings,
+): Promise<void> {
+  if (settings?.isTeg && settings.teg) {
+    await addTag(subdomain, 'companies', duplicateIds, settings.teg, accessToken);
+    return;
+  }
+
+  for (const dupId of duplicateIds) {
+    try {
+      // Relink everything linked to the duplicate company (leads, contacts,
+      // customers) onto the surviving company.
+      try {
+        const links = await amoRequest<any>(
+          subdomain, 'get', `/api/v4/companies/${dupId}/links`, accessToken,
+        );
+        const entities = links._embedded?.links || [];
+        const toLink = entities
+          .filter((l: any) => l.to_entity_id && l.to_entity_type)
+          .map((l: any) => ({ to_entity_id: l.to_entity_id, to_entity_type: l.to_entity_type }));
+        if (toLink.length) {
+          await amoRequest(subdomain, 'post', `/api/v4/companies/${mainId}/link`, accessToken, toLink);
+        }
+      } catch (linkErr: any) {
+        console.warn(`Company link copy ${dupId}->${mainId} failed: ${linkErr.message}`);
+      }
+
+      // Copy custom fields the surviving company is missing.
+      const dupCompany = await amoRequest<any>(subdomain, 'get', `/api/v4/companies/${dupId}`, accessToken);
+      const mainCompany = await amoRequest<any>(subdomain, 'get', `/api/v4/companies/${mainId}`, accessToken);
+      const mergedFields = [...(mainCompany.custom_fields_values || [])];
+      for (const dupField of (dupCompany.custom_fields_values || [])) {
+        if (!mergedFields.some((f: any) => f.field_id === dupField.field_id)) {
+          mergedFields.push(dupField);
+        }
+      }
+      if (mergedFields.length) {
+        try {
+          await amoRequest(subdomain, 'patch', `/api/v4/companies/${mainId}`, accessToken, {
+            custom_fields_values: mergedFields,
+          });
+        } catch (updateErr: any) {
+          console.warn(`Failed to update main company ${mainId}: ${updateErr.message}`);
+        }
+      }
+
+      await addTag(subdomain, 'companies', [dupId], MERGED_TAG, accessToken);
+      console.log(`Duplicate company ${dupId} tagged as merged`);
+    } catch (err: any) {
+      console.error(`FAILED TO MERGE COMPANY ${dupId}:`, err.message);
+      throw new Error(`Merge failed for company ${dupId}: ${err.message}`);
     }
   }
 }

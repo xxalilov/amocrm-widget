@@ -4,8 +4,10 @@ import ConfirmModal from '../components/ConfirmModal';
 import {
   searchContactsByPhone,
   searchLeadsByName,
+  searchCompaniesByField,
   startFindAllContactDuplicates,
   startFindAllLeadDuplicates,
+  startFindAllCompanyDuplicates,
   pollJob,
   mergeEntities,
   startMergeAll,
@@ -13,13 +15,14 @@ import {
   nativeMergeViaHost,
   logMerge,
 } from '../api/duplicates';
-import { fetchContactSettings, fetchLeadSettings } from '../api/settings';
+import { fetchContactSettings, fetchLeadSettings, fetchCompanySettings } from '../api/settings';
 
 function getName(item, type) {
   if (item.name) return item.name;
   if (type === 'contact') {
     return `${item.first_name || ''} ${item.last_name || ''}`.trim() || `Контакт #${item.id}`;
   }
+  if (type === 'company') return `Компания #${item.id}`;
   return `Сделка #${item.id}`;
 }
 
@@ -32,6 +35,10 @@ function displayName(item, type) {
   }
   return '(без названия)';
 }
+
+// Per-type cell label and table header.
+const ENTITY_LABEL = { contact: 'Контакт', lead: 'Сделка', company: 'Компания' };
+const HEADER_LABEL = { contact: 'Контакты', lead: 'Сделки', company: 'Компании' };
 
 // Prepositional case for «Поиск по …», accusative for «Введите …».
 const FIELD_PREP = { phone: 'телефону', email: 'email', name: 'имени' };
@@ -48,6 +55,7 @@ const SINGLE_KEY = '__single__';
 export default function FindDuplicatesTab({ onAuthRequired }) {
   const [type, setType] = useState('contact');
   const [contactField, setContactField] = useState('phone');
+  const [companyField, setCompanyField] = useState('name');
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(false);
   const [mode, setMode] = useState(null);
@@ -63,21 +71,30 @@ export default function FindDuplicatesTab({ onAuthRequired }) {
   const scanRef = useRef(0);
   // Whether each entity is in "tag instead of merge" mode. Tag mode stays on the
   // backend (OAuth); real merge goes through the host's native merge bridge.
-  const tagMode = useRef({ contact: false, lead: false });
+  const tagMode = useRef({ contact: false, lead: false, company: false });
 
   useEffect(() => {
+    // Settings are always in effect now, so reflect the saved compare field and
+    // tag-mode directly.
     fetchContactSettings()
-      // When contact settings are disabled, the backend matches by phone, so the
-      // search field should reflect that rather than the saved (inactive) field.
       .then((data) => {
-        setContactField(data?.status === 'active' ? (data.fields || 'phone') : 'phone');
-        tagMode.current.contact = !!(data?.status === 'active' && data?.isTeg);
+        setContactField(data?.fields || 'phone');
+        tagMode.current.contact = !!data?.isTeg;
       })
       .catch(() => setContactField('phone'));
     fetchLeadSettings()
-      .then((data) => { tagMode.current.lead = !!(data?.status === 'active' && data?.isTeg); })
+      .then((data) => { tagMode.current.lead = !!data?.isTeg; })
       .catch(() => {});
+    fetchCompanySettings()
+      .then((data) => {
+        setCompanyField(data?.fields || 'name');
+        tagMode.current.company = !!data?.isTeg;
+      })
+      .catch(() => setCompanyField('name'));
   }, []);
+
+  // The compare field that applies to the current entity type (leads search by name).
+  const activeField = type === 'company' ? companyField : contactField;
 
   // Perform one group's merge: tag-mode (or non-embedded fallback) goes through
   // the backend; otherwise run amoCRM's native merge via the host, then log it so
@@ -108,20 +125,24 @@ export default function FindDuplicatesTab({ onAuthRequired }) {
 
   const placeholder = useMemo(() => {
     if (type === 'lead') return 'Название сделки';
-    return `Поиск по ${FIELD_PREP[contactField]}`;
-  }, [type, contactField]);
+    if (type === 'company') return activeField === 'name' ? 'Название компании' : `Поиск по ${FIELD_PREP[activeField]}`;
+    return `Поиск по ${FIELD_PREP[activeField]}`;
+  }, [type, activeField]);
 
   const searchButtonLabel = useMemo(() => {
     if (type === 'lead') return 'Поиск по имени';
-    return `Поиск по ${FIELD_PREP[contactField]}`;
-  }, [type, contactField]);
+    if (type === 'company' && activeField === 'name') return 'Поиск по названию';
+    return `Поиск по ${FIELD_PREP[activeField]}`;
+  }, [type, activeField]);
 
   const handleSearch = async () => {
     if (!searchTerm.trim()) {
-      setStatusMsg({
-        kind: 'error',
-        text: type === 'contact' ? `Введите ${FIELD_ACC[contactField]}` : 'Введите название сделки',
-      });
+      const prompt = type === 'lead'
+        ? 'Введите название сделки'
+        : type === 'company'
+          ? (activeField === 'name' ? 'Введите название компании' : `Введите ${FIELD_ACC[activeField]}`)
+          : `Введите ${FIELD_ACC[activeField]}`;
+      setStatusMsg({ kind: 'error', text: prompt });
       return;
     }
     setLoading(true);
@@ -130,11 +151,13 @@ export default function FindDuplicatesTab({ onAuthRequired }) {
     try {
       const data = type === 'contact'
         ? await searchContactsByPhone(searchTerm)
-        : await searchLeadsByName(searchTerm);
+        : type === 'company'
+          ? await searchCompaniesByField(searchTerm)
+          : await searchLeadsByName(searchTerm);
       const items = data.duplicates || [];
       setDuplicates(items);
       setGroups([]);
-      setMatchField(type === 'contact' ? contactField : 'byName');
+      setMatchField(type === 'lead' ? 'byName' : activeField);
       setSelections(items[0] ? { [SINGLE_KEY]: items[0].id } : {});
       if (items.length === 0) setStatusMsg({ kind: 'info', text: 'Дубликаты не найдены' });
     } catch (err) {
@@ -156,7 +179,9 @@ export default function FindDuplicatesTab({ onAuthRequired }) {
     try {
       const { jobId } = type === 'contact'
         ? await startFindAllContactDuplicates()
-        : await startFindAllLeadDuplicates();
+        : type === 'company'
+          ? await startFindAllCompanyDuplicates()
+          : await startFindAllLeadDuplicates();
 
       const job = await pollJob(jobId, {
         shouldCancel: isCancelled,
@@ -176,7 +201,7 @@ export default function FindDuplicatesTab({ onAuthRequired }) {
       const gs = job.groups || [];
       setGroups(gs);
       setDuplicates([]);
-      setMatchField(job.groupedBy || (type === 'contact' ? contactField : 'byContact'));
+      setMatchField(job.groupedBy || (type === 'lead' ? 'byContact' : activeField));
       const sel = {};
       for (const g of gs) {
         const key = g.key ?? g.phone ?? g.name;
@@ -319,7 +344,7 @@ export default function FindDuplicatesTab({ onAuthRequired }) {
     }
   };
 
-  const headerLabel = type === 'contact' ? 'Контакты' : 'Сделки';
+  const headerLabel = HEADER_LABEL[type] || 'Записи';
 
   return (
     <div className="find-tab">
@@ -332,6 +357,7 @@ export default function FindDuplicatesTab({ onAuthRequired }) {
           >
             <option value="contact">Контакт</option>
             <option value="lead">Сделка</option>
+            <option value="company">Компания</option>
           </select>
           <input
             className="find-form__input"
@@ -395,7 +421,7 @@ export default function FindDuplicatesTab({ onAuthRequired }) {
                         >
                           <div className="dup-table__name">{displayName(item, type)}</div>
                           <div className="dup-table__id">
-                            {type === 'contact' ? 'Контакт' : 'Сделка'} · ID: {item.id}
+                            {ENTITY_LABEL[type] || 'Запись'} · ID: {item.id}
                           </div>
                           {row.label && (
                             <div className="dup-table__match-val">
