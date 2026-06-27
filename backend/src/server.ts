@@ -10,7 +10,9 @@ import { HttpException } from './exceptions/HttpException';
 
 
 import authRoutes from './routes/auth';
+import { AMO_ORIGIN_RE } from './controllers/auth';
 import duplicateRoutes from './routes/duplicates';
+import autoRoutes from './routes/auto';
 import accountRoutes from './routes/account';
 import contactSettingsRoutes from './routes/contact-settings';
 import leadSettingsRoutes from './routes/lead-settings';
@@ -24,16 +26,24 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Restrict CORS to the configured app origin(s). The React client is served
-// from this same origin (express.static below), so cross-origin access is only
-// needed for explicitly allow-listed domains via CORS_ORIGIN (comma-separated).
+// CORS: allow the configured app origin(s) (the SPA, served same-origin or as a
+// split nginx image) PLUS any amoCRM/Kommo account origin. The latter is needed
+// because the widget's script.js — running on the customer's amoCRM page — calls
+// the API directly for the background auto-merge loop (and key fetch). Allowing
+// the origin is not a security boundary: every route is still gated by the
+// widget key / subdomain in authenticateWidget.
 const allowedOrigins = (process.env.CORS_ORIGIN || '')
   .split(',')
   .map((o) => o.trim())
   .filter(Boolean);
 app.use(
   cors({
-    origin: allowedOrigins.length > 0 ? allowedOrigins : false,
+    origin: (origin, cb) => {
+      if (!origin) return cb(null, true); // same-origin / non-browser clients
+      if (allowedOrigins.includes(origin)) return cb(null, true);
+      if (AMO_ORIGIN_RE.test(origin)) return cb(null, true);
+      cb(null, false);
+    },
   }),
 );
 app.use(express.json());
@@ -43,6 +53,10 @@ app.use(express.json());
 // the widget key, which also identifies the account.
 app.use('/auth', authRoutes);
 app.use('/api', authenticateWidget, duplicateRoutes);
+// Background auto-merge surface, called by the widget's script.js from the
+// amoCRM page (claim a run, scan, poll, log merges, complete) + a status read
+// for the SPA settings UI.
+app.use('/auto', authenticateWidget, autoRoutes);
 app.use('/accounts', authenticateWidget, accountRoutes);
 app.use('/contact-settings', authenticateWidget, contactSettingsRoutes);
 app.use('/lead-settings', authenticateWidget, leadSettingsRoutes);

@@ -6,6 +6,7 @@ import  ContactSettingsModel  from "../models/contact-settings";
 import  LeadSettingsModel  from "../models/lead-settings";
 import  MergeHistoryModel  from "../models/merge-history";
 import  ScanStatModel  from "../models/scan-stat";
+import  AutoStateModel  from "../models/auto-state";
 
 dotenv.config();
 
@@ -45,7 +46,18 @@ const DB = async function() {
         await sequelize.query(
             `ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS "mergedTag" VARCHAR NOT NULL DEFAULT 'merged'`
         ).catch((err) => console.warn(`${table}.mergedTag column check:`, err.message));
+        // Background auto-merge (browser-driven): enable flag + interval in minutes.
+        await sequelize.query(
+            `ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS "autoMerge" BOOLEAN NOT NULL DEFAULT false`
+        ).catch((err) => console.warn(`${table}.autoMerge column check:`, err.message));
+        await sequelize.query(
+            `ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS "autoInterval" INTEGER NOT NULL DEFAULT 5`
+        ).catch((err) => console.warn(`${table}.autoInterval column check:`, err.message));
     }
+    // Lead status (stage) filter — CSV of status ids, empty = all statuses.
+    await sequelize.query(
+        `ALTER TABLE lead_settings ADD COLUMN IF NOT EXISTS "checkStatuses" VARCHAR NOT NULL DEFAULT ''`
+    ).catch((err) => console.warn('lead_settings.checkStatuses column check:', err.message));
     console.log('Database connected successfully');
 }
 
@@ -54,20 +66,24 @@ const ContactSettings = ContactSettingsModel(sequelize);
 const LeadSettings = LeadSettingsModel(sequelize);
 const MergeHistory = MergeHistoryModel(sequelize);
 const ScanStat = ScanStatModel(sequelize);
+const AutoState = AutoStateModel(sequelize);
 Account.hasOne(ContactSettings, { foreignKey: 'account', as: 'contactSettingsData' });
 Account.hasOne(LeadSettings, { foreignKey: 'account', as: 'leadSettingsData' });
 Account.hasMany(MergeHistory, { foreignKey: 'account', as: 'mergeHistory' });
 Account.hasMany(ScanStat, { foreignKey: 'account', as: 'scanStats' });
+Account.hasMany(AutoState, { foreignKey: 'account', as: 'autoStates' });
 ContactSettings.belongsTo(Account, { foreignKey: 'account', as: 'accountData' });
 LeadSettings.belongsTo(Account, { foreignKey: 'account', as: 'accountData' });
 MergeHistory.belongsTo(Account, { foreignKey: 'account', as: 'accountData' });
 ScanStat.belongsTo(Account, { foreignKey: 'account', as: 'accountData' });
+AutoState.belongsTo(Account, { foreignKey: 'account', as: 'accountData' });
 export const models = {
     Account,
     ContactSettings,
     LeadSettings,
     MergeHistory,
     ScanStat,
+    AutoState,
 }
 
 export default DB;

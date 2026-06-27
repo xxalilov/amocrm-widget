@@ -622,6 +622,44 @@ code {
 .pipeline__name { color: var(--color-text); font-weight: 500; flex: 1; }
 .pipeline__count { font-size: 12px; }
 
+/* statuses nested under a pipeline */
+.pipeline-group {
+  border-top: 1px solid var(--color-border-soft);
+}
+.pipeline-group:first-of-type { border-top: none; }
+.pipeline-group .pipeline--row { border-top: none; }
+.pipeline-statuses {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  padding: 0 0 10px 26px;
+}
+.pipeline-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--color-text);
+}
+.pipeline-status__dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  display: inline-block;
+}
+.pipeline-status__name { white-space: nowrap; }
+
+/* ------- Auto-merge block ------- */
+.auto-block {
+  margin: 16px 0 4px;
+  padding: 14px;
+  border: 1px solid var(--color-border-soft);
+  border-radius: var(--radius);
+  background: var(--color-section-bg, #fafafa);
+}
+
 /* ------- Master toggle row ------- */
 .toggle-row--master {
   background: var(--color-section-bg);

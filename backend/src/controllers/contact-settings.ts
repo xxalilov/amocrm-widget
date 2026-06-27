@@ -5,7 +5,7 @@ import { DEFAULT_CONTACT_SETTINGS } from "../utils/settings";
 const contactSettingsModel = models.ContactSettings;
 
 // Only these fields may be set by the client; `account`/`id` are server-controlled.
-const CONTACT_SETTINGS_FIELDS = ['status', 'fields', 'isFormatNumber', 'checkNumberLength', 'isTeg', 'teg', 'addMergedTag', 'mergedTag'] as const;
+const CONTACT_SETTINGS_FIELDS = ['status', 'fields', 'isFormatNumber', 'checkNumberLength', 'isTeg', 'teg', 'addMergedTag', 'mergedTag', 'autoMerge', 'autoInterval'] as const;
 
 function pickContactSettings(body: any): Record<string, unknown> {
     const out: Record<string, unknown> = {};

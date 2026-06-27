@@ -6,9 +6,9 @@ const leadSettingsModel = models.LeadSettings;
 
 // Only these fields may be set by the client; `account`/`id` are server-controlled.
 const LEAD_SETTINGS_FIELDS = [
-    'status', 'findDublicatesBy', 'checkPipelines', 'advantage',
+    'status', 'findDublicatesBy', 'checkPipelines', 'checkStatuses', 'advantage',
     'remainsStatus', 'isDifferentFunnelCheck', 'isTeg', 'teg',
-    'addMergedTag', 'mergedTag',
+    'addMergedTag', 'mergedTag', 'autoMerge', 'autoInterval',
 ] as const;
 
 function pickLeadSettings(body: any): Record<string, unknown> {

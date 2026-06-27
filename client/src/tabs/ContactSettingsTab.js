@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import Toggle from '../components/Toggle';
+import AutoMergeSection from '../components/AutoMergeSection';
 import { fetchContactSettings, updateContactSettings } from '../api/settings';
+import { fetchAutoStatus } from '../api/auto';
 
 const defaultSettings = {
-  status: 'inactive',
+  status: 'active',
   fields: 'phone',
   isFormatNumber: false,
   checkNumberLength: 9,
@@ -11,6 +13,8 @@ const defaultSettings = {
   teg: '',
   addMergedTag: false,
   mergedTag: 'merged',
+  autoMerge: false,
+  autoInterval: 5,
 };
 
 export default function ContactSettingsTab() {
@@ -19,6 +23,7 @@ export default function ContactSettingsTab() {
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [statusMsg, setStatusMsg] = useState(null);
+  const [autoStatus, setAutoStatus] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -33,6 +38,16 @@ export default function ContactSettingsTab() {
     return () => { cancelled = true; };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => fetchAutoStatus()
+      .then((data) => { if (!cancelled) setAutoStatus(data?.contact || null); })
+      .catch(() => {});
+    load();
+    const t = setInterval(load, 15000);
+    return () => { cancelled = true; clearInterval(t); };
+  }, []);
+
   const updateField = (patch) => {
     setSettings((prev) => ({ ...prev, ...patch }));
     setDirty(true);
@@ -43,7 +58,8 @@ export default function ContactSettingsTab() {
     setSaving(true);
     setStatusMsg(null);
     try {
-      const saved = await updateContactSettings(settings);
+      // No on/off master toggle anymore — settings are always in effect.
+      const saved = await updateContactSettings({ ...settings, status: 'active' });
       setSettings({ ...defaultSettings, ...saved });
       setDirty(false);
       setStatusMsg({ kind: 'info', text: 'Настройки сохранены' });
@@ -58,104 +74,98 @@ export default function ContactSettingsTab() {
 
   return (
     <div className="settings-tab">
-      <div className="toggle-row toggle-row--master">
-        <span><strong>Включить настройки контактов</strong></span>
-        <Toggle
-          checked={settings.status === 'active'}
+      <div className="toggle-row">
+        <span>Поле для сравнения</span>
+        <select
+          className="text-input"
+          value={settings.fields}
           disabled={saving}
-          onChange={(v) => updateField({ status: v ? 'active' : 'inactive' })}
-        />
+          onChange={(e) => updateField({ fields: e.target.value })}
+        >
+          <option value="phone">Телефон</option>
+          <option value="email">Email</option>
+          <option value="name">Имя</option>
+        </select>
       </div>
 
-      {settings.status === 'active' && (
+      {settings.fields === 'phone' && (
         <>
           <div className="toggle-row">
-            <span>Поле для сравнения</span>
-            <select
-              className="text-input"
-              value={settings.fields}
-              disabled={saving}
-              onChange={(e) => updateField({ fields: e.target.value })}
-            >
-              <option value="phone">Телефон</option>
-              <option value="email">Email</option>
-              <option value="name">Имя</option>
-            </select>
-          </div>
-
-          {settings.fields === 'phone' && (
-            <>
-              <div className="toggle-row">
-                <span>Нормализовать номер телефона перед сравнением</span>
-                <Toggle
-                  checked={settings.isFormatNumber}
-                  disabled={saving}
-                  onChange={(v) => updateField({ isFormatNumber: v })}
-                />
-              </div>
-
-              {settings.isFormatNumber && (
-                <div className="toggle-row">
-                  <span>Сколько последних цифр сравнивать</span>
-                  <input
-                    type="number"
-                    className="number-input"
-                    value={settings.checkNumberLength}
-                    disabled={saving}
-                    onChange={(e) => updateField({ checkNumberLength: Number(e.target.value) })}
-                  />
-                </div>
-              )}
-            </>
-          )}
-
-          <div className="toggle-row">
-            <span>Добавлять тег вместо объединения</span>
+            <span>Сравнивать только последние цифры номера</span>
             <Toggle
-              checked={settings.isTeg}
+              checked={settings.isFormatNumber}
               disabled={saving}
-              onChange={(v) => updateField({ isTeg: v })}
+              onChange={(v) => updateField({ isFormatNumber: v })}
             />
           </div>
 
-          {settings.isTeg && (
+          {settings.isFormatNumber && (
             <div className="toggle-row">
-              <span>Название тега</span>
+              <span>Сколько последних цифр сравнивать</span>
               <input
-                type="text"
-                className="text-input"
-                value={settings.teg}
+                type="number"
+                className="number-input"
+                value={settings.checkNumberLength}
                 disabled={saving}
-                onChange={(e) => updateField({ teg: e.target.value })}
-                placeholder="дубль"
-              />
-            </div>
-          )}
-
-          <div className="toggle-row">
-            <span>Добавлять тег после объединения</span>
-            <Toggle
-              checked={settings.addMergedTag}
-              disabled={saving}
-              onChange={(v) => updateField({ addMergedTag: v })}
-            />
-          </div>
-
-          {settings.addMergedTag && (
-            <div className="toggle-row">
-              <span>Название тега</span>
-              <input
-                type="text"
-                className="text-input"
-                value={settings.mergedTag}
-                disabled={saving}
-                onChange={(e) => updateField({ mergedTag: e.target.value })}
-                placeholder="merged"
+                onChange={(e) => updateField({ checkNumberLength: Number(e.target.value) })}
               />
             </div>
           )}
         </>
       )}
+
+      <div className="toggle-row">
+        <span>Добавлять тег вместо объединения</span>
+        <Toggle
+          checked={settings.isTeg}
+          disabled={saving}
+          onChange={(v) => updateField({ isTeg: v })}
+        />
+      </div>
+
+      {settings.isTeg && (
+        <div className="toggle-row">
+          <span>Название тега</span>
+          <input
+            type="text"
+            className="text-input"
+            value={settings.teg}
+            disabled={saving}
+            onChange={(e) => updateField({ teg: e.target.value })}
+            placeholder="дубль"
+          />
+        </div>
+      )}
+
+      <div className="toggle-row">
+        <span>Добавлять тег после объединения</span>
+        <Toggle
+          checked={settings.addMergedTag}
+          disabled={saving}
+          onChange={(v) => updateField({ addMergedTag: v })}
+        />
+      </div>
+
+      {settings.addMergedTag && (
+        <div className="toggle-row">
+          <span>Название тега</span>
+          <input
+            type="text"
+            className="text-input"
+            value={settings.mergedTag}
+            disabled={saving}
+            onChange={(e) => updateField({ mergedTag: e.target.value })}
+            placeholder="merged"
+          />
+        </div>
+      )}
+
+      <AutoMergeSection
+        settings={settings}
+        updateField={updateField}
+        saving={saving}
+        status={autoStatus}
+      />
 
       {statusMsg && (
         <div className={`status-msg status-msg--${statusMsg.kind}`}>{statusMsg.text}</div>

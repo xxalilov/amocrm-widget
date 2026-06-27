@@ -366,6 +366,112 @@ define(['jquery'], function ($) {
       setTimeout(function () { hideNativeSettingsField(attempts - 1); }, 200);
     }
 
+    // ── Background auto-merge ────────────────────────────────────────────────
+    // When auto-merge is enabled (per entity type, in the widget settings), the
+    // backend hands out a "run now" lease on a schedule; we do the actual work
+    // here — scan via the backend, then run amoCRM's STILL native merge in this
+    // session for each group. So auto-merge is a real merge, but only advances
+    // while amoCRM is open (the backend simply pauses the schedule otherwise).
+    // The backend lease ensures only ONE open tab runs a given type at a time.
+    function startAutoRunner() {
+      if (window.__dedupAutoRunner) return;
+      window.__dedupAutoRunner = true;
+      var sub = subdomain();
+      if (!sub) return; // can't authenticate without it
+      // eslint-disable-next-line no-console
+      try { console.log('[dedup] auto-merge runner started for', sub); } catch (e) {}
+
+      function autoApi(path, method, data) {
+        var headers = { 'X-Account-Subdomain': sub };
+        if (cachedKey) headers['Authorization'] = 'Bearer ' + cachedKey;
+        // Wrap the jqXHR in a native Promise: amoCRM's bundled jQuery is old, and
+        // its jqXHR has no .catch() (added only in jQuery 3). Promise.resolve adopts
+        // the thenable, so the whole chain gets real .then()/.catch().
+        return Promise.resolve($.ajax({
+          url: BACKEND_URL + '/auto' + path,
+          method: method,
+          data: data ? JSON.stringify(data) : undefined,
+          contentType: 'application/json; charset=UTF-8',
+          dataType: 'json',
+          headers: headers
+        }));
+      }
+
+      function pollScan(jobId) {
+        return autoApi('/jobs/' + encodeURIComponent(jobId), 'GET', null).then(function (job) {
+          if (job.status === 'done') return job;
+          if (job.status === 'error') throw new Error(job.error || 'scan failed');
+          return new Promise(function (r) { setTimeout(r, 2000); })
+            .then(function () { return pollScan(jobId); });
+        });
+      }
+
+      // Merge every group of one type, one at a time, via the native merge.
+      function mergeGroups(type, groups) {
+        var entity = type === 'lead' ? 'leads' : 'contacts';
+        var merged = 0, failed = 0, i = 0;
+        function step() {
+          if (i >= groups.length) return Promise.resolve({ merged: merged, failed: failed });
+          var g = groups[i++];
+          var items = (g && g.items) || [];
+          if (items.length < 2) return step();
+          var ids = items.map(function (it) { return String(it.id); });
+          var mainId = ids[0];
+          return nativeMerge(entity, mainId, ids).then(function () {
+            merged++;
+            var dupSnapshot = items.slice(1).map(function (it) { return { id: it.id, name: it.name || '' }; });
+            return autoApi('/merge/log', 'POST', {
+              type: type,
+              mainId: Number(mainId),
+              duplicateIds: ids.slice(1).map(Number),
+              mainName: items[0].name || '',
+              duplicates: dupSnapshot
+            }).catch(function () {});
+          }, function () { failed++; }).then(step);
+        }
+        return step();
+      }
+
+      function runOne(type) {
+        var token = null;
+        return autoApi('/claim', 'POST', { type: type }).then(function (resp) {
+          if (!resp || !resp.run) return null;        // disabled, not due, or busy
+          token = resp.token;
+          // eslint-disable-next-line no-console
+          try { console.log('[dedup] auto-merge run started:', type); } catch (e) {}
+          return autoApi('/find-all-duplicates', 'POST', { type: type })
+            .then(function (s) { return pollScan(s.jobId); })
+            .then(function (job) { return mergeGroups(type, job.groups || []); })
+            .then(function (r) {
+              return autoApi('/complete', 'POST', { type: type, token: token, merged: r.merged, failed: r.failed });
+            });
+        }).catch(function (e) {
+          // Always release the lease so the schedule isn't stuck on this tab.
+          if (token) {
+            return autoApi('/complete', 'POST', {
+              type: type, token: token, merged: 0, failed: 0,
+              error: (e && e.message) || 'auto run failed'
+            }).catch(function () {});
+          }
+        });
+      }
+
+      var busy = false;
+      function tick() {
+        if (busy) return;
+        busy = true;
+        // Contacts first (lead grouping can depend on contact duplicates), then leads.
+        runOne('contact')
+          .then(function () { return runOne('lead'); })
+          .then(function () { busy = false; }, function () { busy = false; });
+      }
+
+      // Let the page settle, then poll once a minute. Actual cadence is governed
+      // by the backend (claim returns run:false until the interval elapses).
+      setTimeout(tick, 8000);
+      setInterval(tick, 60000);
+    }
+
     this.callbacks = {
       // Widget settings popup (in amoCRM settings → integrations).
       settings: function () {
@@ -377,6 +483,7 @@ define(['jquery'], function ($) {
       init: function () {
         startDedupGuard();
         startMergeBridge();
+        ensureKey(startAutoRunner);   // resolve the key (optional), then start the loop
         return true;
       },
 

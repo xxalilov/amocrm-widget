@@ -1,7 +1,7 @@
 import { DataTypes, Model, Optional } from "sequelize";
 import { LeadSettings } from "../interfaces/lead-settings";
 
-export type LeadSettingsCreationAttributes = Optional<LeadSettings, "id" | "account" | "status" | "findDublicatesBy" | "checkPipelines" | "advantage" | "remainsStatus" | "isDifferentFunnelCheck" | "isTeg" | "teg" | "addMergedTag" | "mergedTag">;
+export type LeadSettingsCreationAttributes = Optional<LeadSettings, "id" | "account" | "status" | "findDublicatesBy" | "checkPipelines" | "checkStatuses" | "advantage" | "remainsStatus" | "isDifferentFunnelCheck" | "isTeg" | "teg" | "addMergedTag" | "mergedTag" | "autoMerge" | "autoInterval">;
 
 export class LeadSettingsModel extends Model<LeadSettings, LeadSettingsCreationAttributes> implements LeadSettings {
     public id: string;
@@ -9,6 +9,7 @@ export class LeadSettingsModel extends Model<LeadSettings, LeadSettingsCreationA
     public status: string;
     public findDublicatesBy: string;
     public checkPipelines: string;
+    public checkStatuses: string;
     public advantage: string;
     public remainsStatus: string;
     public isDifferentFunnelCheck: boolean;
@@ -16,6 +17,8 @@ export class LeadSettingsModel extends Model<LeadSettings, LeadSettingsCreationA
     public teg: string;
     public addMergedTag: boolean;
     public mergedTag: string;
+    public autoMerge: boolean;
+    public autoInterval: number;
 
 }
 
@@ -45,6 +48,11 @@ export default function (sequelize: any): typeof LeadSettingsModel {
             defaultValue: 'byContact',
         },
         checkPipelines: {
+            type: DataTypes.STRING,
+            allowNull: false,
+            defaultValue: '',
+        },
+        checkStatuses: {
             type: DataTypes.STRING,
             allowNull: false,
             defaultValue: '',
@@ -83,6 +91,16 @@ export default function (sequelize: any): typeof LeadSettingsModel {
             type: DataTypes.STRING,
             allowNull: false,
             defaultValue: 'merged',
+        },
+        autoMerge: {
+            type: DataTypes.BOOLEAN,
+            allowNull: false,
+            defaultValue: false,
+        },
+        autoInterval: {
+            type: DataTypes.INTEGER,
+            allowNull: false,
+            defaultValue: 5,
         }
     }, {
         tableName: 'lead_settings',

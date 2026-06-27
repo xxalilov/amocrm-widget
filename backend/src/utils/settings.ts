@@ -5,7 +5,7 @@ import { LeadSettings } from '../interfaces/lead-settings';
 export const DEFAULT_CONTACT_SETTINGS: ContactSettings = {
     id: '',
     account: '',
-    status: 'inactive',
+    status: 'active',
     fields: 'phone',
     isFormatNumber: false,
     checkNumberLength: 9,
@@ -13,14 +13,17 @@ export const DEFAULT_CONTACT_SETTINGS: ContactSettings = {
     teg: '',
     addMergedTag: false,
     mergedTag: 'merged',
+    autoMerge: false,
+    autoInterval: 5,
 };
 
 export const DEFAULT_LEAD_SETTINGS: LeadSettings = {
     id: '',
     account: '',
-    status: 'inactive',
+    status: 'active',
     findDublicatesBy: 'byContact',
     checkPipelines: '',
+    checkStatuses: '',
     advantage: 'newest',
     remainsStatus: '',
     isDifferentFunnelCheck: false,
@@ -28,6 +31,8 @@ export const DEFAULT_LEAD_SETTINGS: LeadSettings = {
     teg: '',
     addMergedTag: false,
     mergedTag: 'merged',
+    autoMerge: false,
+    autoInterval: 5,
 };
 
 export async function loadContactSettings(accountId: string): Promise<ContactSettings> {

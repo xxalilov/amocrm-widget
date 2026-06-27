@@ -19,8 +19,6 @@ import { HttpException } from '../exceptions/HttpException';
 import {
     loadContactSettings,
     loadLeadSettings,
-    DEFAULT_CONTACT_SETTINGS,
-    DEFAULT_LEAD_SETTINGS,
 } from '../utils/settings';
 import { getValidAccount } from '../services/auth';
 import { createJob, getJob, updateJob, runJob, activeJobFor, ScanGroup } from '../utils/jobStore';
@@ -35,6 +33,15 @@ function leadInAllowedPipeline(lead: any, checkPipelines: string): boolean {
     const allowed = checkPipelines.split(',').map(s => s.trim()).filter(Boolean);
     if (allowed.length === 0) return true;
     return allowed.includes(String(lead.pipeline_id));
+}
+
+// Keeps a lead only if its status (stage) is in the allow-list. Empty = all
+// statuses. Selected per pipeline in the UI, stored as a flat CSV of status ids.
+function leadInAllowedStatus(lead: any, checkStatuses: string): boolean {
+    if (!checkStatuses) return true;
+    const allowed = checkStatuses.split(',').map(s => s.trim()).filter(Boolean);
+    if (allowed.length === 0) return true;
+    return allowed.includes(String(lead.status_id));
 }
 
 // Orders leads within a group so the surviving record (the "main") is first.
@@ -95,19 +102,16 @@ async function buildContactClusterMap(account: AccountModel, contactSettings: Co
     return map;
 }
 
-// The "Enable …" master toggle (status) chooses configured behavior vs. defaults
-// — it does NOT block the feature. When settings are off or missing we fall back
-// to sensible defaults: contacts match by phone, leads match by name, the most
-// recent record is suggested as main, and duplicates are merged (never tag-only).
+// Settings are always in effect (there is no on/off master toggle anymore). A
+// brand-new account with no saved row gets DEFAULT_*_SETTINGS from the loaders,
+// so these just pass the loaded settings through. Kept as a single choke point
+// in case per-account normalization is needed later.
 function effectiveContactSettings(s: ContactSettings): ContactSettings {
-    if (s.status === 'active') return s;
-    return { ...DEFAULT_CONTACT_SETTINGS, account: s.account, fields: 'phone' };
+    return s;
 }
 
 function effectiveLeadSettings(s: LeadSettings): LeadSettings {
-    if (s.status === 'active') return s;
-    // byName + cross-funnel: plain name grouping across all pipelines.
-    return { ...DEFAULT_LEAD_SETTINGS, account: s.account, findDublicatesBy: 'byName', isDifferentFunnelCheck: true };
+    return s;
 }
 
 export const search = async (req: Request, res: Response, next: NextFunction) => {
@@ -182,7 +186,10 @@ async function scanLeadDuplicates(
     onProgress: (n: number) => void,
 ): Promise<ScanResult> {
     const allItems = await getAllLeads(account.subdomain, account.access_token, onProgress);
-    const filtered = allItems.filter((l) => leadInAllowedPipeline(l, settings.checkPipelines));
+    const filtered = allItems.filter(
+        (l) => leadInAllowedPipeline(l, settings.checkPipelines)
+            && leadInAllowedStatus(l, settings.checkStatuses),
+    );
 
     // For byContact, treat leads of duplicate contacts as duplicates too (#2):
     // build the contact-duplicate clusters and group leads by cluster, not raw id.
