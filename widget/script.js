@@ -378,8 +378,6 @@ define(['jquery'], function ($) {
       window.__dedupAutoRunner = true;
       var sub = subdomain();
       if (!sub) return; // can't authenticate without it
-      // eslint-disable-next-line no-console
-      try { console.log('[dedup] auto-merge runner started for', sub); } catch (e) {}
 
       function autoApi(path, method, data) {
         var headers = { 'X-Account-Subdomain': sub };
@@ -397,12 +395,9 @@ define(['jquery'], function ($) {
         }));
       }
 
-      // Diagnostics: one helper, one eslint-disable. Watch these in the amoCRM
-      // page console to see exactly what the auto-runner is doing.
-      function dlog() {
-        // eslint-disable-next-line no-console
-        try { console.log.apply(console, ['[dedup]'].concat([].slice.call(arguments))); } catch (e) {}
-      }
+      // Diagnostics hook — no-op. Flip the body to console.log(...) temporarily
+      // if you need to trace the auto-runner; left silent in production.
+      function dlog() {}
 
       function pollScan(jobId) {
         return autoApi('/jobs/' + encodeURIComponent(jobId), 'GET', null).then(function (job) {
