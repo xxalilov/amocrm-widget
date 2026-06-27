@@ -5,10 +5,11 @@ import { models } from "../utils/database";
 import { loadContactSettings, loadLeadSettings } from "../utils/settings";
 import { HttpException } from "../exceptions/HttpException";
 
-// How long a run may hold the lease before another tab is allowed to take over.
-// Generous: a full base scan + merge can take many minutes; if the owning tab
-// crashes/closes the lease simply expires and the schedule resumes.
-const LEASE_TTL_MS = 20 * 60_000;
+// How long a run may hold the lease without a heartbeat before another tab may
+// take over. Kept SHORT so a crashed/closed tab frees the schedule quickly; an
+// actively-running tab keeps it alive by calling /heartbeat every ~45s (a real
+// scan+merge can take many minutes, far longer than this base TTL).
+const LEASE_TTL_MS = 3 * 60_000;
 
 function isAutoType(t: any): t is 'contact' | 'lead' {
     return t === 'contact' || t === 'lead';
@@ -65,6 +66,25 @@ export const claimAuto = async (req: Request, res: Response, next: NextFunction)
         );
         if (affected === 1) return res.json({ run: true, token, interval });
         return res.json({ run: false });
+    } catch (err) {
+        next(err);
+    }
+};
+
+// Keep-alive: the tab that holds the lease calls this periodically while it's
+// actively scanning/merging, so a long run isn't taken over mid-flight. Only the
+// lease owner (matching token) can extend it.
+export const heartbeatAuto = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const { type, token } = req.body;
+        if (!isAutoType(type)) throw new HttpException(400, 'Invalid type');
+        const accountId = req.account!.id;
+
+        const [affected] = await models.AutoState.update(
+            { leaseExpiresAt: new Date(Date.now() + LEASE_TTL_MS) },
+            { where: { account: accountId, type, leaseToken: token } },
+        );
+        return res.json({ ok: affected === 1 });
     } catch (err) {
         next(err);
     }

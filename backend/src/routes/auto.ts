@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { claimAuto, completeAuto, autoStatus } from '../controllers/auto';
+import { claimAuto, completeAuto, heartbeatAuto, autoStatus } from '../controllers/auto';
 import { findAllDuplicates, getScanJob, mergeLog } from '../controllers/dublicate';
 
 // Driven by widget/script.js (background auto-merge loop). It claims a due run,
@@ -9,6 +9,7 @@ import { findAllDuplicates, getScanJob, mergeLog } from '../controllers/dublicat
 const router = Router();
 
 router.post('/claim', claimAuto);
+router.post('/heartbeat', heartbeatAuto);
 router.post('/complete', completeAuto);
 router.get('/status', autoStatus);
 

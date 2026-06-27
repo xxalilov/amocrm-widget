@@ -397,6 +397,13 @@ define(['jquery'], function ($) {
         }));
       }
 
+      // Diagnostics: one helper, one eslint-disable. Watch these in the amoCRM
+      // page console to see exactly what the auto-runner is doing.
+      function dlog() {
+        // eslint-disable-next-line no-console
+        try { console.log.apply(console, ['[dedup]'].concat([].slice.call(arguments))); } catch (e) {}
+      }
+
       function pollScan(jobId) {
         return autoApi('/jobs/' + encodeURIComponent(jobId), 'GET', null).then(function (job) {
           if (job.status === 'done') return job;
@@ -434,18 +441,33 @@ define(['jquery'], function ($) {
 
       function runOne(type) {
         var token = null;
+        var hb = null;  // heartbeat interval, keeps the lease alive during the run
+        function stopHb() { if (hb) { clearInterval(hb); hb = null; } }
+
         return autoApi('/claim', 'POST', { type: type }).then(function (resp) {
+          dlog('claim', type, resp);
           if (!resp || !resp.run) return null;        // disabled, not due, or busy
           token = resp.token;
-          // eslint-disable-next-line no-console
-          try { console.log('[dedup] auto-merge run started:', type); } catch (e) {}
+          dlog('run started:', type, '(token ' + token + ')');
+          // Keep the lease alive while we work (scan + merge can take minutes).
+          hb = setInterval(function () {
+            autoApi('/heartbeat', 'POST', { type: type, token: token }).catch(function () {});
+          }, 45000);
+
           return autoApi('/find-all-duplicates', 'POST', { type: type })
-            .then(function (s) { return pollScan(s.jobId); })
-            .then(function (job) { return mergeGroups(type, job.groups || []); })
+            .then(function (s) { dlog('scan job started:', type, s); return pollScan(s.jobId); })
+            .then(function (job) {
+              var n = (job.groups || []).length;
+              dlog('scan done:', type, '— duplicate groups:', n, '(scanned', job.scanned, 'records)');
+              return mergeGroups(type, job.groups || []);
+            })
             .then(function (r) {
+              dlog('merge done:', type, '— merged', r.merged, 'failed', r.failed);
               return autoApi('/complete', 'POST', { type: type, token: token, merged: r.merged, failed: r.failed });
             });
-        }).catch(function (e) {
+        }).then(function () { stopHb(); }, function (e) {
+          stopHb();
+          dlog('ERROR in run', type, '—', (e && e.message) || e);
           // Always release the lease so the schedule isn't stuck on this tab.
           if (token) {
             return autoApi('/complete', 'POST', {
@@ -461,14 +483,19 @@ define(['jquery'], function ($) {
         if (busy) return;
         busy = true;
         // Contacts first (lead grouping can depend on contact duplicates), then leads.
-        runOne('contact')
+        // Start from Promise.resolve() so even a synchronous throw inside runOne is
+        // caught here and never leaves `busy` stuck (which would freeze all ticks).
+        Promise.resolve()
+          .then(function () { return runOne('contact'); })
           .then(function () { return runOne('lead'); })
           .then(function () { busy = false; }, function () { busy = false; });
       }
 
-      // Let the page settle, then poll once a minute. Actual cadence is governed
-      // by the backend (claim returns run:false until the interval elapses).
-      setTimeout(tick, 8000);
+      // Claim immediately on open — so a due run starts the moment the user enters
+      // amoCRM ("men kirdim") — then poll once a minute. Cadence is still governed
+      // by the backend (claim returns run:false until the interval elapses, and a
+      // not-due account just gets run:false instantly).
+      tick();
       setInterval(tick, 60000);
     }
 
