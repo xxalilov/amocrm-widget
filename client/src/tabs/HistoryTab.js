@@ -13,6 +13,8 @@ function formatDate(value) {
 
 const PAGE_SIZE = 50;
 
+const TYPE_LABEL = { contact: 'Контакт', lead: 'Сделка', company: 'Компания' };
+
 export default function HistoryTab() {
   const [rows, setRows] = useState([]);
   const [page, setPage] = useState(1);
@@ -53,7 +55,7 @@ export default function HistoryTab() {
             {rows.map((r) => (
               <tr key={r.id}>
                 <td>{formatDate(r.createdAt)}</td>
-                <td>{r.type === 'contact' ? 'Контакт' : 'Сделка'}</td>
+                <td>{TYPE_LABEL[r.type] || 'Запись'}</td>
                 <td>
                   {r.action === 'tag'
                     ? <span className="badge badge--tag">Тег{r.tag ? `: ${r.tag}` : ''}</span>
