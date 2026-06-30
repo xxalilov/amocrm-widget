@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react';
 import Toggle from '../components/Toggle';
 import AutoMergeSection from '../components/AutoMergeSection';
 import { fetchCompanySettings, updateCompanySettings } from '../api/settings';
-import { fetchAutoStatus } from '../api/auto';
 
 const defaultSettings = {
   status: 'active',
@@ -23,7 +22,6 @@ export default function CompanySettingsTab() {
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [statusMsg, setStatusMsg] = useState(null);
-  const [autoStatus, setAutoStatus] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -36,16 +34,6 @@ export default function CompanySettingsTab() {
       })
       .finally(() => { if (!cancelled) { setLoading(false); setDirty(false); } });
     return () => { cancelled = true; };
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    const load = () => fetchAutoStatus()
-      .then((data) => { if (!cancelled) setAutoStatus(data?.company || null); })
-      .catch(() => {});
-    load();
-    const t = setInterval(load, 15000);
-    return () => { cancelled = true; clearInterval(t); };
   }, []);
 
   const updateField = (patch) => {
@@ -163,7 +151,6 @@ export default function CompanySettingsTab() {
         settings={settings}
         updateField={updateField}
         saving={saving}
-        status={autoStatus}
       />
 
       {statusMsg && (

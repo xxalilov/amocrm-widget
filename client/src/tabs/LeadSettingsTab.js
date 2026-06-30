@@ -3,7 +3,6 @@ import Toggle from '../components/Toggle';
 import AutoMergeSection from '../components/AutoMergeSection';
 import { fetchLeadSettings, updateLeadSettings } from '../api/settings';
 import { fetchPipelines } from '../api/pipelines';
-import { fetchAutoStatus } from '../api/auto';
 
 const defaultSettings = {
   status: 'active',
@@ -38,7 +37,6 @@ export default function LeadSettingsTab() {
   const [statusMsg, setStatusMsg] = useState(null);
   const [pipelines, setPipelines] = useState([]);
   const [pipelinesError, setPipelinesError] = useState(null);
-  const [autoStatus, setAutoStatus] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -57,16 +55,6 @@ export default function LeadSettingsTab() {
     fetchPipelines()
       .then((data) => setPipelines(data || []))
       .catch((err) => setPipelinesError(err.message || 'Failed to load pipelines'));
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    const load = () => fetchAutoStatus()
-      .then((data) => { if (!cancelled) setAutoStatus(data?.lead || null); })
-      .catch(() => {});
-    load();
-    const t = setInterval(load, 15000);
-    return () => { cancelled = true; clearInterval(t); };
   }, []);
 
   const selectedPipelines = useMemo(() => parseIds(settings.checkPipelines), [settings.checkPipelines]);
@@ -261,7 +249,6 @@ export default function LeadSettingsTab() {
         settings={settings}
         updateField={updateField}
         saving={saving}
-        status={autoStatus}
       />
 
       {statusMsg && (
