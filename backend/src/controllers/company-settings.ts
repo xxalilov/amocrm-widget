@@ -5,7 +5,7 @@ import { DEFAULT_COMPANY_SETTINGS } from "../utils/settings";
 const companySettingsModel = models.CompanySettings;
 
 // Only these fields may be set by the client; `account`/`id` are server-controlled.
-const COMPANY_SETTINGS_FIELDS = ['status', 'fields', 'isFormatNumber', 'checkNumberLength', 'isTeg', 'teg', 'addMergedTag', 'mergedTag', 'autoMerge', 'autoInterval'] as const;
+const COMPANY_SETTINGS_FIELDS = ['status', 'fields', 'isFormatNumber', 'checkNumberLength', 'isTeg', 'teg', 'addMergedTag', 'mergedTag', 'autoMerge', 'autoInterval', 'preventDuplicates'] as const;
 
 function pickCompanySettings(body: any): Record<string, unknown> {
     const out: Record<string, unknown> = {};

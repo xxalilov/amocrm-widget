@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { checkAuth, findAllDuplicates, getScanJob, merge, mergeAll, mergeLog, search, searchLeadsByNames } from '../controllers/dublicate';
+import { checkAuth, checkDuplicate, findAllDuplicates, getScanJob, merge, mergeAll, mergeLog, preventConfig, search, searchLeadsByNames } from '../controllers/dublicate';
 
 
 const router = Router();
@@ -17,6 +17,10 @@ router.post('/merge/log', mergeLog);
 router.post('/search-leads-by-name', searchLeadsByNames);
 
 router.get('/jobs/:jobId', getScanJob);
+
+router.get('/prevent-config', preventConfig);
+
+router.post('/check-duplicate', checkDuplicate);
 
 router.get('/check-auth', checkAuth);
 

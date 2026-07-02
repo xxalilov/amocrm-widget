@@ -158,19 +158,27 @@ export async function searchContacts(
   settings: ContactSettings,
 ): Promise<AmoEntity[]> {
   let key: string;
+  let queryTerm: string;
   if (settings.fields === 'phone') {
     key = term.replace(/\D/g, '');
     if (settings.isFormatNumber && settings.checkNumberLength > 0) {
       key = key.slice(-settings.checkNumberLength);
     }
+    if (!key) return [];
+    // Query amoCRM by the normalized digits (the comparison key), NOT the raw
+    // input. amoCRM's phone search matches by digit substring, so searching the
+    // last-N digits (e.g. 909999999) finds both "909999999" and "+998909999999";
+    // searching the raw "+998909999999" would miss a contact stored as "909999999".
+    queryTerm = key;
   } else {
     key = term.toLowerCase().trim();
+    queryTerm = term;
   }
 
   const result = await amoRequest<SearchResult>(
     subdomain,
     'get',
-    `/api/v4/contacts?query=${encodeURIComponent(term)}`,
+    `/api/v4/contacts?query=${encodeURIComponent(queryTerm)}`,
     accessToken,
   );
   const contacts = result._embedded?.contacts || [];
@@ -245,19 +253,23 @@ export async function searchCompanies(
   settings: CompanySettings,
 ): Promise<AmoEntity[]> {
   let key: string;
+  let queryTerm: string;
   if (settings.fields === 'phone') {
     key = term.replace(/\D/g, '');
     if (settings.isFormatNumber && settings.checkNumberLength > 0) {
       key = key.slice(-settings.checkNumberLength);
     }
+    if (!key) return [];
+    queryTerm = key; // query amoCRM by normalized digits (see searchContacts note)
   } else {
     key = term.toLowerCase().trim();
+    queryTerm = term;
   }
 
   const result = await amoRequest<SearchResult>(
     subdomain,
     'get',
-    `/api/v4/companies?query=${encodeURIComponent(term)}`,
+    `/api/v4/companies?query=${encodeURIComponent(queryTerm)}`,
     accessToken,
   );
   const companies = result._embedded?.companies || [];

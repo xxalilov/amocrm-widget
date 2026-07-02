@@ -1,7 +1,7 @@
 import { DataTypes, Model, Optional } from "sequelize";
 import { CompanySettings } from "../interfaces/company-settings";
 
-export type CompanySettingsCreationAttributes = Optional<CompanySettings, "id" | "account" | "status" | "fields" | "isFormatNumber" | "checkNumberLength" | "isTeg" | "teg" | "addMergedTag" | "mergedTag" | "autoMerge" | "autoInterval">;
+export type CompanySettingsCreationAttributes = Optional<CompanySettings, "id" | "account" | "status" | "fields" | "isFormatNumber" | "checkNumberLength" | "isTeg" | "teg" | "addMergedTag" | "mergedTag" | "autoMerge" | "autoInterval" | "preventDuplicates">;
 
 export class CompanySettingsModel extends Model<CompanySettings, CompanySettingsCreationAttributes> implements CompanySettings {
     public id: string;
@@ -16,6 +16,7 @@ export class CompanySettingsModel extends Model<CompanySettings, CompanySettings
     public mergedTag: string;
     public autoMerge: boolean;
     public autoInterval: number;
+    public preventDuplicates: boolean;
 
 }
 
@@ -83,6 +84,11 @@ export default function (sequelize: any): typeof CompanySettingsModel {
             type: DataTypes.INTEGER,
             allowNull: false,
             defaultValue: 5,
+        },
+        preventDuplicates: {
+            type: DataTypes.BOOLEAN,
+            allowNull: false,
+            defaultValue: false,
         }
     }, {
         tableName: 'company_settings',

@@ -14,6 +14,7 @@ const defaultSettings = {
   mergedTag: 'merged',
   autoMerge: false,
   autoInterval: 5,
+  preventDuplicates: false,
 };
 
 export default function ContactSettingsTab() {
@@ -147,6 +148,15 @@ export default function ContactSettingsTab() {
           />
         </div>
       )}
+
+      <div className="toggle-row">
+        <span><strong>Блокировать создание дублей</strong></span>
+        <Toggle
+          checked={!!settings.preventDuplicates}
+          disabled={saving}
+          onChange={(v) => updateField({ preventDuplicates: v })}
+        />
+      </div>
 
       <AutoMergeSection
         settings={settings}

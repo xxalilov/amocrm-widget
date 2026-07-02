@@ -11,4 +11,5 @@ export interface CompanySettings {
     mergedTag: string;       // the tag name to add (default "merged")
     autoMerge: boolean;      // periodically scan & merge in the background (browser-driven)
     autoInterval: number;    // minutes to wait after a full run before the next one
+    preventDuplicates: boolean; // block creating a company that duplicates an existing one
 }

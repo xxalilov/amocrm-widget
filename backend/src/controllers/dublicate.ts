@@ -596,6 +596,74 @@ export const searchLeadsByNames = async (req: Request, res: Response, next: Next
     }
 }
 
+// Whether duplicate-prevention is enabled, so script.js knows if it should install
+// the save guard on the amoCRM card. (Contacts only for now.)
+export const preventConfig = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const account = await requireAccount(req.account!.subdomain);
+        const contact = await loadContactSettings(account.id);
+        const company = await loadCompanySettings(account.id);
+        res.json({
+            contact: contact.preventDuplicates === true,
+            company: company.preventDuplicates === true,
+        });
+    } catch (err) {
+        next(err);
+    }
+}
+
+// Called by script.js right before a contact card is saved: does the entered
+// phone/email/name already exist? Returns matching contacts (with links) so the
+// widget can warn and block the save. Honours the account's compare field and
+// normalization, and excludes the record being edited (excludeId).
+export const checkDuplicate = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const { type, phone, email, name, excludeId } = req.body;
+        if (type !== 'contact' && type !== 'company') return res.json({ duplicates: [], enabled: false });
+
+        const account = await requireAccount(req.account!.subdomain);
+        const ex = String(excludeId || '');
+
+        if (type === 'company') {
+            const settings = effectiveCompanySettings(await loadCompanySettings(account.id));
+            if (!settings.preventDuplicates) return res.json({ duplicates: [], enabled: false });
+            const term = settings.fields === 'email' ? email
+                : settings.fields === 'phone' ? phone
+                : name;
+            if (!term || !String(term).trim()) return res.json({ duplicates: [], enabled: true });
+            const items = await searchCompanies(account.subdomain, String(term), account.access_token, settings);
+            const duplicates = items
+                .filter((c) => String(c.id) !== ex)
+                .map((c) => ({
+                    id: c.id,
+                    name: c.name || `#${c.id}`,
+                    url: `https://${account.subdomain}.amocrm.ru/companies/detail/${c.id}`,
+                }));
+            return res.json({ duplicates, enabled: true });
+        }
+
+        const settings = effectiveContactSettings(await loadContactSettings(account.id));
+        if (!settings.preventDuplicates) return res.json({ duplicates: [], enabled: false });
+        const term = settings.fields === 'email' ? email
+            : settings.fields === 'name' ? name
+            : phone;
+        if (!term || !String(term).trim()) return res.json({ duplicates: [], enabled: true });
+
+        const items = await searchContacts(account.subdomain, String(term), account.access_token, settings);
+        const duplicates = items
+            .filter((c) => String(c.id) !== ex)
+            .map((c) => ({
+                id: c.id,
+                name: c.name || `#${c.id}`,
+                url: `https://${account.subdomain}.amocrm.ru/contacts/detail/${c.id}`,
+            }));
+        res.json({ duplicates, enabled: true });
+    } catch (err: any) {
+        console.error('Check duplicate error:', err.message);
+        next(err);
+    }
+}
+
 // Reaching this means the widget key was valid (the auth middleware passed).
 export const checkAuth = async (req: Request, res: Response, next: NextFunction) => {
     try {

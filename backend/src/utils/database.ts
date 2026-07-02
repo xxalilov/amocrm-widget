@@ -59,6 +59,12 @@ const DB = async function() {
     await sequelize.query(
         `ALTER TABLE lead_settings ADD COLUMN IF NOT EXISTS "checkStatuses" VARCHAR NOT NULL DEFAULT ''`
     ).catch((err) => console.warn('lead_settings.checkStatuses column check:', err.message));
+    // Block creating a duplicate on save (prevention) — contacts and companies.
+    for (const table of ['contact_settings', 'company_settings']) {
+        await sequelize.query(
+            `ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS "preventDuplicates" BOOLEAN NOT NULL DEFAULT false`
+        ).catch((err) => console.warn(`${table}.preventDuplicates column check:`, err.message));
+    }
     // Company duplicate handling shares the contact-style 'type' enum on the
     // stats/history/auto tables — extend those enums with 'company' on older DBs
     // (sync never alters an existing enum). ADD VALUE IF NOT EXISTS is idempotent.

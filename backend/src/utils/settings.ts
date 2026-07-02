@@ -16,6 +16,7 @@ export const DEFAULT_CONTACT_SETTINGS: ContactSettings = {
     mergedTag: 'merged',
     autoMerge: false,
     autoInterval: 5,
+    preventDuplicates: false,   // contact prevention
 };
 
 export const DEFAULT_LEAD_SETTINGS: LeadSettings = {
@@ -49,6 +50,7 @@ export const DEFAULT_COMPANY_SETTINGS: CompanySettings = {
     mergedTag: 'merged',
     autoMerge: false,
     autoInterval: 5,
+    preventDuplicates: false,
 };
 
 export async function loadCompanySettings(accountId: string): Promise<CompanySettings> {

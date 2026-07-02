@@ -495,6 +495,209 @@ define(['jquery'], function ($) {
       setInterval(tick, 60000);
     }
 
+    // ── Duplicate prevention (block save) ────────────────────────────────────
+    // When enabled (contact settings → «Блокировать создание дублей»), intercept
+    // the contact card's Save click, check the entered phone/email against the
+    // backend, and if a match exists show a popup with a link and keep the save
+    // blocked. This hooks amoCRM's own DOM Save button (no public API for it), so
+    // it's defensive: on any uncertainty it lets the save through rather than
+    // trapping the user.
+    function startDuplicateGuard() {
+      if (window.__dedupPreventGuard) return;
+      window.__dedupPreventGuard = true;
+      var sub = subdomain();
+      if (!sub) return;
+
+      function preventApi(path, method, data) {
+        var headers = { 'X-Account-Subdomain': sub };
+        if (cachedKey) headers['Authorization'] = 'Bearer ' + cachedKey;
+        return Promise.resolve($.ajax({
+          url: BACKEND_URL + path,
+          method: method,
+          data: data ? JSON.stringify(data) : undefined,
+          contentType: 'application/json; charset=UTF-8',
+          dataType: 'json',
+          headers: headers
+        }));
+      }
+
+      var cfg = { contact: false, company: false };
+      // Install the interceptor if prevention is on for contacts or companies.
+      preventApi('/api/prevent-config', 'GET', null).then(function (c) {
+        cfg.contact = !!(c && c.contact);
+        cfg.company = !!(c && c.company);
+        if (cfg.contact || cfg.company) installGuard();
+      }).catch(function () {});
+
+      var allowNext = false;
+
+      // Which entity card are we on: 'contact' | 'company' | null.
+      function cardType() {
+        var s = location.pathname + location.hash;
+        if (s.indexOf('/contacts/') !== -1) return 'contact';
+        if (s.indexOf('/companies/') !== -1) return 'company';
+        return null;
+      }
+
+      function currentEntityId(type) {
+        var re = type === 'company' ? /companies\/detail\/(\d+)/ : /contacts\/detail\/(\d+)/;
+        var m = (location.pathname + location.hash).match(re);
+        return m ? m[1] : '';
+      }
+
+      // Find the clicked Save button (by visible text) within the card.
+      function saveButtonFrom(target) {
+        var el = target;
+        for (var i = 0; el && i < 6; i++) {
+          var tag = (el.tagName || '').toLowerCase();
+          if (tag === 'button' || (el.className && String(el.className).indexOf('button-input') !== -1)) {
+            var txt = (el.textContent || '').trim().toLowerCase();
+            if (txt.indexOf('сохранить') !== -1 || txt === 'save') return el;
+          }
+          el = el.parentNode;
+        }
+        return null;
+      }
+
+      var EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+      function looksLikePhone(v) {
+        return /^[+\d\s()\-]+$/.test(v) && v.replace(/\D/g, '').length >= 6;
+      }
+      function inputMeta(inp) {
+        return ((inp.name || '') + ' ' + (inp.className || '') + ' ' + (inp.type || '') +
+          ' ' + (inp.getAttribute('data-code') || '') + ' ' + (inp.placeholder || '')).toLowerCase();
+      }
+
+      // Scope the search to the edited card (not the whole page), so an unrelated
+      // phone elsewhere (search bar, another panel) isn't picked up.
+      function fieldScope(btn) {
+        var s = btn.closest && (
+          btn.closest('.card-holder, .card_holder, .js-card, .linked-form, .js-linked-form') ||
+          btn.closest('[class*="card-fields"]') ||
+          btn.closest('form'));
+        return s || document;
+      }
+
+      // Pull the entered phone/email from the card. Prefers inputs explicitly
+      // marked as phone/email (name/class/type), then falls back to value shape.
+      function extractValues(btn) {
+        var scope = fieldScope(btn);
+        var inputs = scope.querySelectorAll('input');
+        var phone = '', email = '';
+        for (var i = 0; i < inputs.length; i++) {
+          var inp = inputs[i];
+          var v = (inp.value || '').trim();
+          if (!v) continue;
+          var meta = inputMeta(inp);
+          if (!email && (meta.indexOf('email') !== -1 || EMAIL_RE.test(v))) email = v;
+          if (!phone && (meta.indexOf('phone') !== -1 || inp.type === 'tel')) phone = v;
+        }
+        // Fallback: no field explicitly marked phone → take a phone-shaped value.
+        if (!phone) {
+          for (var j = 0; j < inputs.length; j++) {
+            var val = (inputs[j].value || '').trim();
+            if (val && !EMAIL_RE.test(val) && looksLikePhone(val)) { phone = val; break; }
+          }
+        }
+        // Card name (title) — used when the account compares by name (e.g. companies).
+        // It lives in the card header, outside the fields scope, so query the document.
+        var name = '';
+        var nameEl = document.querySelector('.js-card-name input, .js-card-name textarea, ' +
+          '[class*="card-name"] input, [class*="card-name"] textarea, #card_name_holder input');
+        if (nameEl) name = (nameEl.value || '').trim();
+        return { phone: phone, email: email, name: name };
+      }
+
+      function removeModal() {
+        var old = document.getElementById('dedup-prevent-overlay');
+        if (old && old.parentNode) old.parentNode.removeChild(old);
+      }
+
+      function ensureModalStyle() {
+        if (document.getElementById('dedup-prevent-style')) return;
+        var st = document.createElement('style');
+        st.id = 'dedup-prevent-style';
+        st.textContent =
+          '#dedup-prevent-overlay{position:fixed;inset:0;z-index:1000000;background:rgba(12,16,24,.55);' +
+          'display:flex;align-items:center;justify-content:center;animation:dedupFade .15s ease-out;}' +
+          '@keyframes dedupFade{from{opacity:0}to{opacity:1}}' +
+          '#dedup-prevent-overlay .dp-modal{width:400px;max-width:calc(100vw - 32px);background:#fff;border-radius:14px;' +
+          'box-shadow:0 24px 70px rgba(0,0,0,.35);font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;' +
+          'overflow:hidden;animation:dedupPop .2s ease-out;}' +
+          '@keyframes dedupPop{from{opacity:0;transform:translateY(-12px) scale(.97)}to{opacity:1;transform:none}}' +
+          '#dedup-prevent-overlay .dp-head{display:flex;align-items:center;gap:10px;padding:15px 16px;border-bottom:1px solid #f2f2f2;}' +
+          '#dedup-prevent-overlay .dp-ic{width:24px;height:24px;flex:0 0 auto;border-radius:50%;background:#ffe9dd;color:#ff6a2b;' +
+          'display:flex;align-items:center;justify-content:center;font-weight:700;font-size:15px;}' +
+          '#dedup-prevent-overlay .dp-title{flex:1;font-size:15px;font-weight:600;color:#1a1a1a;}' +
+          '#dedup-prevent-overlay .dp-close{cursor:pointer;color:#b6b6b6;font-size:22px;line-height:1;padding:0 2px;}' +
+          '#dedup-prevent-overlay .dp-close:hover{color:#666;}' +
+          '#dedup-prevent-overlay .dp-sub{padding:12px 16px 3px;font-size:12px;color:#8a8a8a;}' +
+          '#dedup-prevent-overlay .dp-list{padding:4px 8px 12px;max-height:260px;overflow:auto;}' +
+          '#dedup-prevent-overlay .dp-row{display:flex;align-items:center;gap:8px;padding:9px 10px;border-radius:8px;' +
+          'color:#2b7cff;text-decoration:none;font-size:13px;}' +
+          '#dedup-prevent-overlay .dp-row:hover{background:#f4f8ff;}' +
+          '#dedup-prevent-overlay .dp-arrow{margin-left:auto;color:#c6c6c6;}';
+        (document.head || document.body).appendChild(st);
+      }
+
+      function showDupModal(dups, type) {
+        removeModal();
+        ensureModalStyle();
+        var title = type === 'company' ? 'Компания уже существует' : 'Контакт уже существует';
+        var sub = type === 'company' ? 'Найдены компании с такими же данными:' : 'Найдены контакты с такими же данными:';
+        var rows = dups.map(function (d) {
+          var label = (d.name || ('#' + d.id)).replace(/</g, '&lt;');
+          return '<a class="dp-row" href="' + d.url + '" target="_blank" rel="noopener">' +
+            '<span>' + label + '</span><span class="dp-arrow">&#8599;</span></a>';
+        }).join('');
+        var overlay = document.createElement('div');
+        overlay.id = 'dedup-prevent-overlay';
+        overlay.innerHTML =
+          '<div class="dp-modal">' +
+            '<div class="dp-head">' +
+              '<span class="dp-ic">!</span>' +
+              '<span class="dp-title">' + title + '</span>' +
+              '<span class="dp-close" id="dedup-prevent-close">&times;</span>' +
+            '</div>' +
+            '<div class="dp-sub">' + sub + '</div>' +
+            '<div class="dp-list">' + rows + '</div>' +
+          '</div>';
+        document.body.appendChild(overlay);
+        // Close on backdrop click or the × button.
+        overlay.addEventListener('click', function (e) { if (e.target === overlay) removeModal(); });
+        var close = document.getElementById('dedup-prevent-close');
+        if (close) close.onclick = removeModal;
+      }
+
+      function installGuard() {
+        document.addEventListener('click', function (e) {
+          // Re-dispatched click after a clean check → let it reach amoCRM.
+          if (allowNext) { allowNext = false; return; }
+          var btn = saveButtonFrom(e.target);
+          if (!btn) return;
+          var type = cardType();
+          if (!type || !cfg[type]) return; // not on a guarded card
+          var vals = extractValues(btn);
+          if (!vals.phone && !vals.email && !vals.name) return; // nothing to check → allow save
+          // Block amoCRM's own handlers until we know it's not a duplicate.
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          preventApi('/api/check-duplicate', 'POST', {
+            type: type, phone: vals.phone, email: vals.email, name: vals.name, excludeId: currentEntityId(type)
+          }).then(function (resp) {
+            var dups = (resp && resp.duplicates) || [];
+            if (dups.length) {
+              showDupModal(dups, type);        // keep the save blocked
+            } else {
+              removeModal(); allowNext = true; btn.click(); // clean → let it save
+            }
+          }, function () {
+            removeModal(); allowNext = true; btn.click();   // on error, never trap the user
+          });
+        }, true); // capture phase: run before amoCRM's own click handlers
+      }
+    }
+
     this.callbacks = {
       // Widget settings popup (in amoCRM settings → integrations).
       settings: function () {
@@ -506,7 +709,10 @@ define(['jquery'], function ($) {
       init: function () {
         startDedupGuard();
         startMergeBridge();
-        ensureKey(startAutoRunner);   // resolve the key (optional), then start the loop
+        ensureKey(function () {
+          startAutoRunner();      // background auto-merge loop
+          startDuplicateGuard();  // block-on-save duplicate prevention
+        });
         return true;
       },
 
